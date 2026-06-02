@@ -1,230 +1,158 @@
 // ============================================================
-//  main.js — UI controller & app bootstrap
-//  Wires menus, mode selection, HUD and game lifecycle together.
+// Entry point — boots Rapier, wires UI ⇄ Game ⇄ Net.
 // ============================================================
-
+import RAPIER from '@dimforge/rapier3d-compat';
 import { Game } from './game.js';
+import { UIManager } from './ui.js';
+import { NetClient } from './net.js';
+import { audio } from './audio.js';
 
-const canvas = document.getElementById('game');
-const game = new Game(canvas);
+const canvas = document.getElementById('game-canvas');
+const ui = new UIManager();
 
-// --- element helpers ---
-const $ = (id) => document.getElementById(id);
-const show = (el) => el.classList.remove('hidden');
-const hide = (el) => el.classList.add('hidden');
-const screens = {
-  menu: $('menu'),
-  ai: $('screen-ai'),
-  versus: $('screen-versus'),
-  howto: $('screen-howto'),
-  pause: $('screen-pause'),
-  result: $('screen-result'),
-};
-function hideAllOverlays() { Object.values(screens).forEach(hide); }
-function goScreen(name) { hideAllOverlays(); show(screens[name]); game.sfx.click(); }
+let game = null;
+let net = null;
 
-// --- populate arena chips ---
-function buildArenaChips(containerId) {
-  const c = $(containerId);
-  c.innerHTML = '';
-  Game.arenaList().forEach((a, i) => {
-    const b = document.createElement('button');
-    b.className = 'chip' + (i === 0 ? ' active' : '');
-    b.dataset.val = a.key;
-    b.textContent = a.name;
-    c.appendChild(b);
+async function boot() {
+  ui.setLoading(15, '物理エンジンを初期化中...');
+  await RAPIER.init();
+  ui.setLoading(60, 'アリーナを構築中...');
+  game = new Game(RAPIER, canvas, ui);
+  game.ui.input.initDesktop(canvas);
+  ui.setLoading(100, '準備完了！');
+  await new Promise(r => setTimeout(r, 350));
+  ui.show('menu');
+
+  // auto-join via ?room=CODE
+  const params = new URLSearchParams(location.search);
+  const roomParam = params.get('room');
+  if (roomParam) {
+    ui.show('online-setup');
+    document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+    document.getElementById('join-code').value = roomParam.toUpperCase();
+  }
+}
+
+// ---- audio unlock on first interaction ----
+ui.on('userInteract', () => { audio.init(); audio.resume(); });
+window.addEventListener('pointerdown', () => { audio.init(); audio.resume(); }, { once: true });
+
+// ---- AI / practice ----
+ui.on('startAI', ({ difficulty, weapon, stage }) => {
+  audio.init();
+  ui.hide('ai-setup');
+  game.net = null;
+  game.startMatch({
+    mode: 'ai', difficulty, weapons: [weapon, weapon], stage,
+    names: ['YOU', 'CPU (' + diffLabel(difficulty) + ')'], localIndex: 0,
   });
-}
-buildArenaChips('arena-ai');
-buildArenaChips('arena-vs');
-
-// --- generic chip group selection ---
-function bindChipGroup(containerId) {
-  const c = $(containerId);
-  c.addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip');
-    if (!chip) return;
-    c.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
-    chip.classList.add('active');
-    game.sfx.click();
-  });
-}
-['difficulty', 'arena-ai', 'bestof-ai', 'arena-vs', 'bestof-vs'].forEach(bindChipGroup);
-function chipVal(containerId) {
-  const a = $(containerId).querySelector('.chip.active');
-  return a ? a.dataset.val : null;
-}
-
-// --- main menu navigation ---
-$('menu').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-screen]');
-  if (btn) goScreen(btn.dataset.screen);
 });
-document.querySelectorAll('[data-back]').forEach(b =>
-  b.addEventListener('click', () => goScreen('menu')));
 
-// --- HUD setup ---
-const hud = $('hud');
-const touch = $('touch');
-function setupHud(names) {
-  $('name1').textContent = names[0];
-  $('name2').textContent = names[1];
-  renderPips([0, 0]);
-}
-function renderPips(scores) {
-  const needed = Math.ceil(game.bestOf / 2);
-  for (let p = 0; p < 2; p++) {
-    const el = $('pips' + (p + 1));
-    el.innerHTML = '';
-    for (let i = 0; i < needed; i++) {
-      const d = document.createElement('div');
-      d.className = 'pip' + (i < scores[p] ? ' win' + (p + 1) : '');
-      el.appendChild(d);
+ui.on('startPractice', () => {
+  audio.init();
+  game.net = null;
+  game.startMatch({
+    mode: 'ai', difficulty: 'easy', weapons: ['katana', 'katana'], stage: 'arena',
+    names: ['YOU', 'TRAINING'], localIndex: 0,
+  });
+});
+
+// ---- pause / result ----
+ui.on('togglePause', () => { game.pause(!game.paused); });
+ui.on('rematch', () => game.rematch());
+ui.on('toMenu', () => { game.stop(); net?.close(); net = null; ui.show('menu'); });
+
+// ============================================================
+// ONLINE MODE
+// ============================================================
+ui.on('createRoom', async ({ name, weapon }) => {
+  audio.init();
+  ui.setWaiting('サーバーに接続中...');
+  net = new NetClient();
+  wireNet(net);
+  try {
+    await net.connect();
+    net.createRoom(name, weapon);
+    ui._pendingName = name; ui._pendingWeapon = weapon;
+  } catch (e) {
+    ui.setWaiting('⚠ 接続できません。サーバー未起動の可能性があります。');
+  }
+});
+
+ui.on('joinRoom', async ({ name, code, weapon }) => {
+  if (!code) { ui.setConnStatus('⚠ ルームコードを入力してください'); return; }
+  audio.init();
+  ui.setConnStatus('接続中...');
+  net = new NetClient();
+  wireNet(net);
+  try {
+    await net.connect();
+    net.joinRoom(code, name, weapon);
+    ui._pendingName = name; ui._pendingWeapon = weapon;
+  } catch (e) {
+    ui.setConnStatus('⚠ 接続できません。');
+  }
+});
+
+function wireNet(n) {
+  n.on('roomCreated', (code) => { ui.showRoomCode(code); ui.setWaiting('相手の参加を待っています...'); });
+  n.on('peerJoined', (msg) => {
+    // host: both ready → start as authority
+    ui.setWaiting('相手が参加しました！開始します...');
+    startOnlineMatch(0, [ui._pendingWeapon || 'katana', msg.weapon || 'katana'], [ui._pendingName || 'YOU', msg.name || 'P2']);
+  });
+  n.on('joinedRoom', (msg) => {
+    // guest: start as client (local index 1)
+    ui.setConnStatus('✓ 参加成功！開始します...');
+    startOnlineMatch(1, [msg.hostWeapon || 'katana', ui._pendingWeapon || 'katana'], [msg.hostName || 'P1', ui._pendingName || 'YOU']);
+  });
+  n.on('netError', (m) => { ui.setConnStatus('⚠ ' + m); ui.setWaiting('⚠ ' + m); });
+  n.on('peerLeft', () => { ui.banner('相手が退出しました', 'count'); setTimeout(() => { game.stop(); ui.show('menu'); }, 1800); });
+  n.on('disconnect', () => {});
+
+  // gameplay sync
+  n.on('remoteInput', (data) => {
+    // host applies guest input to fighter[1]
+    if (n.isHost && game.fighters[1]) {
+      const d = game.fighters[1].doll;
+      d.moveDir = data.moveX; if (data.jump) d.wantJump = true;
+      d.blocking = data.block; if (data.aim !== undefined) d.setAim(data.aim);
     }
-  }
-}
-function banner(text, ms = 1400) {
-  const b = $('round-banner');
-  b.textContent = text;
-  b.classList.add('show');
-  clearTimeout(banner._t);
-  banner._t = setTimeout(() => b.classList.remove('show'), ms);
-}
-
-// --- detect touch device ---
-const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-
-// --- start match ---
-function beginMatch(mode) {
-  const arena = mode === 'ai' ? chipVal('arena-ai') : chipVal('arena-vs');
-  const bestOf = parseInt(mode === 'ai' ? chipVal('bestof-ai') : chipVal('bestof-vs'), 10);
-  const difficulty = chipVal('difficulty') || 'normal';
-  const names = mode === 'ai' ? ['YOU', 'CPU'] : ['PLAYER 1', 'PLAYER 2'];
-
-  hideAllOverlays();
-  show(hud);
-  $('hudArena').textContent = Game.arenaList().find(a => a.key === arena)?.name || '';
-  if (isTouch && mode === 'ai') show(touch); else hide(touch);
-  $('pauseBtn').style.display = 'block';
-
-  game.start({ mode, difficulty, arena, bestOf, names });
-  setupHud(names);
-  banner('ラウンド 1 — ファイト!');
-  game.sfx.click();
-}
-$('startAI').addEventListener('click', () => beginMatch('ai'));
-$('startVS').addEventListener('click', () => beginMatch('versus'));
-
-// --- game callbacks ---
-game.onScore = (scores, winnerIdx) => {
-  renderPips(scores);
-  banner((winnerIdx === 0 ? game.names[0] : game.names[1]) + ' が勝利!', 1600);
-};
-game.onRoundEnd = (winnerIdx, matchOver) => {
-  if (matchOver) {
-    game.stop();
-    hide(hud); hide(touch);
-    $('pauseBtn').style.display = 'none';
-    const name = winnerIdx === 0 ? game.names[0] : game.names[1];
-    $('resultTitle').textContent = '🏆 ' + name + ' の勝利!';
-    $('resultSub').textContent = `最終スコア ${game.scores[0]} - ${game.scores[1]}`;
-    show(screens.result);
-  } else {
-    const roundNo = game.scores[0] + game.scores[1] + 1;
-    banner('ラウンド ' + roundNo + ' — ファイト!');
-  }
-};
-
-// --- pause ---
-let paused = false;
-$('pauseBtn').addEventListener('click', () => togglePause());
-function togglePause() {
-  if (!game.running && !paused) return;
-  paused = !paused;
-  if (paused) {
-    game.running = false;
-    show(screens.pause);
-  } else {
-    hide(screens.pause);
-    game.running = true;
-    requestAnimationFrame(game._loop);
-  }
-}
-$('resumeBtn').addEventListener('click', () => togglePause());
-$('quitBtn').addEventListener('click', () => {
-  paused = false;
-  game.stop();
-  hideAllOverlays();
-  hide(hud); hide(touch);
-  $('pauseBtn').style.display = 'none';
-  show(screens.menu);
-});
-$('soundToggle').addEventListener('change', (e) => { game.sfx.enabled = e.target.checked; });
-
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' && (game.running || paused)) togglePause();
-});
-
-// --- result buttons ---
-$('rematchBtn').addEventListener('click', () => {
-  hide(screens.result);
-  show(hud);
-  if (isTouch && game.mode === 'ai') show(touch);
-  $('pauseBtn').style.display = 'block';
-  game.start({
-    mode: game.mode, difficulty: game.difficulty,
-    arena: game.arenaKey, bestOf: game.bestOf, names: game.names
   });
-  setupHud(game.names);
-  banner('ラウンド 1 — ファイト!');
-});
-$('resultMenuBtn').addEventListener('click', () => {
-  hide(screens.result);
-  hide(hud); hide(touch);
-  $('pauseBtn').style.display = 'none';
-  show(screens.menu);
-});
-
-// --- touch button bindings (player 0) ---
-touch.querySelectorAll('.tbtn').forEach(btn => {
-  const act = btn.dataset.act;
-  const set = (v) => game.input.setTouch(0, act, v);
-  btn.addEventListener('touchstart', (e) => { e.preventDefault(); set(true); }, { passive: false });
-  btn.addEventListener('touchend', (e) => { e.preventDefault(); set(false); }, { passive: false });
-  btn.addEventListener('mousedown', () => set(true));
-  btn.addEventListener('mouseup', () => set(false));
-  btn.addEventListener('mouseleave', () => set(false));
-});
-
-// resume audio on first interaction
-window.addEventListener('pointerdown', () => game.sfx._ensure(), { once: true });
-
-// --- debug auto-start (append #autostart=ai|versus to URL) ---
-if (location.hash.includes('autostart')) {
-  setTimeout(() => {
-    const m = location.hash.includes('versus') ? 'versus' : 'ai';
-    try {
-      beginMatch(m);
-      // sanity probe after a few seconds
-      setTimeout(() => {
-        const f = game.fighters;
-        // sample the canvas to confirm rendering produced varied pixels
-        const ctx = canvas.getContext('2d');
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const colors = new Set();
-        for (let i = 0; i < data.length; i += 4000) {
-          colors.add(data[i] + ',' + data[i + 1] + ',' + data[i + 2]);
-        }
-        console.log('AUTOSTART_OK fighters=' + f.length +
-          ' headAboveHip=' + (f[0].head.y < f[0].hip.y) +
-          ' running=' + game.running +
-          ' distinctColors=' + colors.size +
-          ' canvas=' + canvas.width + 'x' + canvas.height);
-      }, 2500);
-    } catch (err) {
-      console.error('AUTOSTART_FAIL', err.message);
+  n.on('remoteSwing', (dir) => {
+    const idx = n.isHost ? 1 : 0;
+    const d = game.fighters[idx]?.doll;
+    if (d) { d.startSwing(dir.x, dir.y); audio.swing(); }
+  });
+  n.on('snapshot', (data) => {
+    // guest applies authoritative snapshot
+    if (!n.isHost && game.fighters.length === 2) {
+      game.fighters[0].doll.applySnapshot(data.a, 0.5);
+      game.fighters[1].doll.applySnapshot(data.b, 0.5);
     }
-  }, 300);
+  });
+  n.on('roundEnd', (winner, scores) => {
+    if (!n.isHost) { game.scores = scores; game.ui.updateRoundPips(scores, 2); }
+  });
 }
 
-console.log('⚔️ Ragdoll Blade Arena ready');
+function startOnlineMatch(localIndex, weapons, names) {
+  ui.hide('online-setup');
+  game.net = net;
+  // guest fighters are remote-authority; configure
+  game.startMatch({
+    mode: 'online', weapons, stage: 'arena', names, localIndex,
+  });
+  // net stat display
+  document.getElementById('net-stat')?.classList.remove('hidden');
+  setInterval(() => {
+    const el = document.getElementById('net-stat');
+    if (el && net) el.textContent = `ping: ${net.ping} ms ${net.isHost ? '(host)' : '(guest)'}`;
+  }, 1000);
+}
+
+function diffLabel(d) {
+  return { easy: 'かんたん', normal: 'ふつう', hard: 'むずかしい', insane: '鬼' }[d] || d;
+}
+
+boot();
