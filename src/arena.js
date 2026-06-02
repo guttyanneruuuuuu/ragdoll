@@ -1,111 +1,182 @@
 // ============================================================
-// Arena / stage — ground, walls, lighting, themed environments
+// Arena / stage builder — Three.js scenery + hazards.
+// Replicates the low-poly colorful look from Ragdoll Blade.
 // ============================================================
 import * as THREE from 'three';
-
-const STAGES = {
-  arena: {
-    name: '闘技場', floor: 0x141422, grid: 0xff2d75, fog: 0x0a0a16,
-    sky: [0x1a0b2e, 0x0a0a16], accents: 0x00e5ff,
-  },
-  snow: {
-    name: '雪山', floor: 0xdfeaf5, grid: 0x88bbdd, fog: 0xcfe0f0,
-    sky: [0xbcd4ec, 0x8fb3d9], accents: 0x66ccff,
-  },
-  factory: {
-    name: '工場', floor: 0x2a2a30, grid: 0xffaa22, fog: 0x15151a,
-    sky: [0x2a2a35, 0x101015], accents: 0xffaa22,
-  },
-};
+import { STAGES, WORLD } from './config.js';
 
 export class Arena {
-  constructor(RAPIER, world, scene, stageKey = 'arena') {
-    this.RAPIER = RAPIER;
-    this.world = world;
+  constructor(scene, world, stageKey = 'arena') {
     this.scene = scene;
-    this.cfg = STAGES[stageKey] || STAGES.arena;
-    this.halfWidth = 9;
-    this.objects = [];
-    this._build();
+    this.world = world;
+    this.stageKey = stageKey;
+    this.stage = STAGES[stageKey] ?? STAGES.arena;
+    this.props = new THREE.Group();
+    this.hazards = [];
+    scene.add(this.props);
+    this.build();
   }
 
-  _build() {
-    const { scene, world, RAPIER, cfg } = this;
+  clear() {
+    this.scene.remove(this.props);
+    this.props = new THREE.Group();
+    this.scene.add(this.props);
+    this.hazards = [];
+  }
 
-    // background gradient
-    scene.background = new THREE.Color(cfg.sky[1]);
-    scene.fog = new THREE.Fog(cfg.fog, 14, 38);
+  build() {
+    const s = this.stage;
+    this.scene.background = new THREE.Color(s.sky);
+    this.scene.fog = new THREE.Fog(s.fog, 18, 80);
 
-    // ground physics (static)
-    const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0));
-    world.createCollider(RAPIER.ColliderDesc.cuboid(this.halfWidth, 0.5, 6).setFriction(1.0), groundBody);
+    // ground disc
+    const radius = s.ringOut ? WORLD.arenaRadius : 40;
+    this.world.arenaRadius = s.ringOut ? WORLD.arenaRadius : Infinity;
+    this.world.cliffEdge = s.hazard === 'cliff';
 
-    // ground visual
-    const floorMat = new THREE.MeshStandardMaterial({ color: cfg.floor, roughness: 0.85, metalness: 0.1 });
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(this.halfWidth * 2, 1, 12), floorMat);
-    floor.position.y = -0.5; floor.receiveShadow = true;
-    scene.add(floor); this.objects.push(floor);
+    const groundGeo = new THREE.CylinderGeometry(radius, radius, 1, 48);
+    const groundMat = new THREE.MeshStandardMaterial({ color: s.ground, roughness: 0.9, metalness: 0.05 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.position.y = -0.5;
+    ground.receiveShadow = true;
+    this.props.add(ground);
 
-    // grid overlay
-    const grid = new THREE.GridHelper(this.halfWidth * 2, 28, cfg.grid, cfg.grid);
-    grid.position.y = 0.01;
-    grid.material.transparent = true; grid.material.opacity = 0.25;
-    scene.add(grid); this.objects.push(grid);
+    // glowing ring edge
+    const ringGeo = new THREE.TorusGeometry(radius, 0.22, 16, 80);
+    const ringMat = new THREE.MeshStandardMaterial({ color: s.accent, emissive: s.accent,
+      emissiveIntensity: 1.5, roughness: 0.3 });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.02;
+    this.props.add(ring);
+    this.ring = ring;
 
-    // arena walls (invisible physics + neon visual edges)
-    for (const side of [-1, 1]) {
-      const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(side * (this.halfWidth + 0.5), 3, 0));
-      world.createCollider(RAPIER.ColliderDesc.cuboid(0.5, 4, 6).setRestitution(0.3), wallBody);
-      // neon pillar
-      const pillarMat = new THREE.MeshStandardMaterial({ color: cfg.accents, emissive: cfg.accents, emissiveIntensity: 0.8, roughness: 0.3 });
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 8, 12), pillarMat);
-      pillar.position.set(side * (this.halfWidth + 0.3), 3.5, -3);
-      scene.add(pillar); this.objects.push(pillar);
-      const pillar2 = pillar.clone(); pillar2.position.z = 3; scene.add(pillar2); this.objects.push(pillar2);
+    if (this.stageKey === 'arena') this.buildArenaDecor(radius, s);
+    else if (this.stageKey === 'meadow') this.buildMeadow(radius, s);
+    else if (this.stageKey === 'cliff') this.buildCliff(radius, s);
+    else if (this.stageKey === 'saw') this.buildSaw(radius, s);
+  }
+
+  buildArenaDecor(radius, s) {
+    // grid floor pattern via subtle lines + neon pillars
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const pillar = new THREE.Mesh(
+        new THREE.BoxGeometry(0.4, 6, 0.4),
+        new THREE.MeshStandardMaterial({ color: 0x1a1f3a, emissive: s.accent, emissiveIntensity: 0.3 })
+      );
+      pillar.position.set(Math.cos(a) * (radius + 2.5), 3, Math.sin(a) * (radius + 2.5));
+      this.props.add(pillar);
+      const light = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 10, 10),
+        new THREE.MeshBasicMaterial({ color: s.accent })
+      );
+      light.position.set(Math.cos(a) * (radius + 2.5), 6, Math.sin(a) * (radius + 2.5));
+      this.props.add(light);
     }
+    // grid texture
+    const grid = new THREE.GridHelper(radius * 2, 24, s.accent, 0x223052);
+    grid.position.y = 0.03;
+    grid.material.opacity = 0.25; grid.material.transparent = true;
+    this.props.add(grid);
+  }
 
-    // back wall (z) physics
-    for (const z of [-6, 6]) {
-      const zBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 3, z));
-      world.createCollider(RAPIER.ColliderDesc.cuboid(this.halfWidth, 4, 0.5), zBody);
+  buildMeadow(radius, s) {
+    // scatter low-poly rocks, ferns, flowers
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 1, flatShading: true });
+    const fernMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 1, flatShading: true });
+    const flowerMat = new THREE.MeshStandardMaterial({ color: 0x9c4dcc, roughness: 1 });
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = radius * (0.4 + Math.random() * 0.7);
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const t = Math.random();
+      let m;
+      if (t < 0.4) { m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.3 + Math.random() * 0.4), rockMat); }
+      else if (t < 0.8) { m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 5), fernMat); }
+      else { m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25), flowerMat); }
+      m.position.set(x, 0.2, z); m.castShadow = true;
+      m.rotation.y = Math.random() * Math.PI;
+      this.props.add(m);
     }
-
-    // ---- lighting ----
-    const amb = new THREE.AmbientLight(0xffffff, 0.55);
-    scene.add(amb);
-    const key = new THREE.DirectionalLight(0xffffff, 1.5);
-    key.position.set(6, 14, 8);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    key.shadow.camera.left = -14; key.shadow.camera.right = 14;
-    key.shadow.camera.top = 14; key.shadow.camera.bottom = -8;
-    key.shadow.camera.near = 1; key.shadow.camera.far = 40;
-    key.shadow.bias = -0.0004;
-    scene.add(key); this.objects.push(key);
-
-    const rim1 = new THREE.PointLight(this.cfg.accents, 2.0, 30);
-    rim1.position.set(-8, 6, 4); scene.add(rim1); this.objects.push(rim1);
-    const rim2 = new THREE.PointLight(0xff2d75, 1.6, 30);
-    rim2.position.set(8, 6, -4); scene.add(rim2); this.objects.push(rim2);
-
-    // crowd / backdrop blocks for depth
-    const bdMat = new THREE.MeshStandardMaterial({ color: cfg.floor, roughness: 0.9, emissive: 0x000000 });
-    for (let i = 0; i < 24; i++) {
-      const h = 1 + Math.random() * 3;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.8, h, 0.8), bdMat);
-      const side = i % 2 === 0 ? -1 : 1;
-      b.position.set((Math.random() - 0.5) * 18, h / 2 - 1, side * (7 + Math.random() * 4));
-      scene.add(b); this.objects.push(b);
+    // distant mountains
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const mt = new THREE.Mesh(
+        new THREE.ConeGeometry(10 + Math.random() * 6, 18 + Math.random() * 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0x5a7f3f, flatShading: true, roughness: 1 })
+      );
+      mt.position.set(Math.cos(a) * 55, 6, Math.sin(a) * 55);
+      this.props.add(mt);
+    }
+    // sky clouds
+    const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true });
+    cloudMat.opacity = 0.4;
+    for (let i = 0; i < 6; i++) {
+      const cloud = new THREE.Mesh(new THREE.SphereGeometry(3 + Math.random() * 2, 8, 8), cloudMat);
+      cloud.position.set((Math.random() - 0.5) * 80, 30 + Math.random() * 10, (Math.random() - 0.5) * 80);
+      this.props.add(cloud);
     }
   }
 
-  get name() { return this.cfg.name; }
-
-  destroy() {
-    for (const o of this.objects) {
-      this.scene.remove(o);
-      o.geometry?.dispose?.(); o.material?.dispose?.();
+  buildCliff(radius, s) {
+    // narrow bridge platform — falling off z edges = ring out
+    const plat = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 2, 1, 12),
+      new THREE.MeshStandardMaterial({ color: s.ground, roughness: 1, flatShading: true })
+    );
+    plat.position.y = -0.5; plat.receiveShadow = true;
+    this.props.add(plat);
+    // sky gradient pillars
+    for (let i = 0; i < 6; i++) {
+      const spire = new THREE.Mesh(
+        new THREE.ConeGeometry(2, 20, 5),
+        new THREE.MeshStandardMaterial({ color: 0x8a6d4f, flatShading: true })
+      );
+      spire.position.set((i - 3) * 9, -14, (i % 2 ? 14 : -14));
+      this.props.add(spire);
     }
-    this.objects = [];
+  }
+
+  buildSaw(radius, s) {
+    // spinning saw blades that deal damage
+    const sawMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalness: 0.9, roughness: 0.2,
+      emissive: s.accent, emissiveIntensity: 0.2 });
+    const positions = [[0, 0], [radius * 0.55, 0], [-radius * 0.55, 0]];
+    for (const [px, pz] of positions) {
+      const saw = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.2, 16), sawMat);
+      saw.rotation.z = Math.PI / 2;
+      saw.position.set(px, 1.6, pz);
+      // teeth
+      for (let t = 0; t < 12; t++) {
+        const a = (t / 12) * Math.PI * 2;
+        const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5, 4), sawMat);
+        tooth.position.set(Math.cos(a) * 1.7, 0, Math.sin(a) * 1.7);
+        tooth.rotation.z = -a + Math.PI / 2;
+        saw.add(tooth);
+      }
+      this.props.add(saw);
+      this.hazards.push({ mesh: saw, type: 'saw', x: px, z: pz, r: 1.9 });
+    }
+  }
+
+  update(dt, fighters) {
+    if (this.ring) this.ring.material.emissiveIntensity = 1.0 + Math.sin(performance.now() * 0.004) * 0.3;
+    // spin saws & damage fighters
+    for (const h of this.hazards) {
+      if (h.type === 'saw') {
+        h.mesh.rotation.x += dt * 8;
+        for (const f of fighters) {
+          if (!f.alive) continue;
+          for (const node of ['chest', 'hip', 'head']) {
+            const p = f.nodes[node].p;
+            const d = Math.hypot(p.x - h.x, p.z - h.z);
+            if (d < h.r && Math.abs(p.y - 1.6) < 1.2) {
+              f.applyImpact(node, 30, { x: (p.x - h.x) * 20, y: 8, z: (p.z - h.z) * 20 });
+            }
+          }
+        }
+      }
+    }
   }
 }

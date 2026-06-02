@@ -1,127 +1,168 @@
 // ============================================================
-// Input — virtual joysticks (touch) + keyboard/mouse (desktop)
-// Produces a normalized control state consumed by the local fighter.
+// Input — dual virtual joysticks (move + sword) via nipplejs,
+// plus desktop keyboard/mouse fallback.
+//   left stick  -> movement direction
+//   right stick -> sword swing direction (release = slash)
+//
+// NOTE: We use mode: 'semi' so the joystick appears wherever the
+// player first touches inside the zone. This solves "I tap but
+// nothing happens" complaints from mode: 'static' where the pad
+// is invisible/fixed and players miss it.
 // ============================================================
 import nipplejs from 'nipplejs';
 
 export class InputManager {
   constructor() {
-    this.state = {
-      moveX: 0,          // -1..1
-      jump: false,
-      block: false,
-      swing: false,      // edge-triggered (consumed)
-      swingDir: { x: 1, y: 0 },  // direction of sword swing
-      aimAngle: 0,
-    };
-    this._keys = {};
-    this._moveJoy = null;
-    this._swordJoy = null;
-    this._swingQueued = false;
-    this.isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    this.move = { x: 0, z: 0 };
+    this.swingQueued = null;     // {dx,dy} when a swing is fired
+    this.blocking = false;
+    this._rightVec = { x: 0, y: 0 };
+    this._joysticks = [];
+    this.keys = {};
+    this._touchEls = null;
   }
 
-  initTouch() {
-    const moveZone = document.getElementById('joystick-move');
-    const swordZone = document.getElementById('joystick-sword');
+  initTouch(leftEl, rightEl) {
+    this.destroy();
+    if (!leftEl || !rightEl) return;
+    this._touchEls = { left: leftEl, right: rightEl };
 
-    this._moveJoy = nipplejs.create({
-      zone: moveZone, mode: 'static', position: { left: '50%', top: '55%' },
-      color: 'rgba(0,229,255,0.6)', size: 110,
-    });
-    this._moveJoy.on('move', (e, d) => {
-      this.state.moveX = Math.cos(d.angle.radian) * Math.min(1, d.distance / 50);
-      if (d.vector.y > 0.6) this.state.jump = true;
-    });
-    this._moveJoy.on('end', () => { this.state.moveX = 0; });
-
-    this._swordJoy = nipplejs.create({
-      zone: swordZone, mode: 'static', position: { left: '50%', top: '55%' },
-      color: 'rgba(255,45,117,0.6)', size: 120,
-    });
-    let lastDir = { x: 1, y: 0 };
-    this._swordJoy.on('move', (e, d) => {
-      const x = Math.cos(d.angle.radian);
-      const y = Math.sin(d.angle.radian);
-      lastDir = { x, y };
-      this.state.aimAngle = Math.atan2(y, x);
-    });
-    this._swordJoy.on('end', () => {
-      // releasing the sword stick triggers a swing in last direction
-      this.state.swingDir = { ...lastDir };
-      this._swingQueued = true;
-    });
-
-    // action buttons
-    const jumpBtn = document.getElementById('btn-jump');
-    const blockBtn = document.getElementById('btn-block');
-    const press = (el, on, off) => {
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); on(); }, { passive: false });
-      el.addEventListener('touchend', (e) => { e.preventDefault(); off?.(); }, { passive: false });
-      el.addEventListener('mousedown', on);
-      el.addEventListener('mouseup', () => off?.());
+    // Make sure layout is settled before nipplejs measures the zones.
+    // Without this, zones can have width/height = 0 and the joystick
+    // never receives touchstart events (the classic "stick doesn't react").
+    const create = () => {
+      // double-check zones have non-zero size; if not, retry next frame
+      const lr = leftEl.getBoundingClientRect();
+      const rr = rightEl.getBoundingClientRect();
+      if (lr.width < 10 || lr.height < 10 || rr.width < 10 || rr.height < 10) {
+        requestAnimationFrame(create);
+        return;
+      }
+      this._buildJoysticks(leftEl, rightEl);
     };
-    press(jumpBtn, () => { this.state.jump = true; });
-    press(blockBtn, () => { this.state.block = true; }, () => { this.state.block = false; });
+    // Wait two RAFs so any display:none -> block change is fully applied
+    requestAnimationFrame(() => requestAnimationFrame(create));
+  }
+
+  _buildJoysticks(leftEl, rightEl) {
+    // ---- LEFT: movement ----
+    // semi mode = stick appears where you press; restJoystick=false means
+    // it stays where you put it until release. Much better UX than 'static'.
+    const left = nipplejs.create({
+      zone: leftEl,
+      mode: 'semi',
+      catchDistance: 200,
+      color: '#00e5ff',
+      size: 130,
+      restJoystick: true,
+      restOpacity: 0.6,
+      threshold: 0.05,
+      fadeTime: 80,
+    });
+    left.on('start move', (e, d) => {
+      if (!d || !d.angle) return;
+      const a = d.angle.radian;
+      const f = Math.min(d.force, 1.4);
+      this.move.x = Math.cos(a) * f;
+      this.move.z = -Math.sin(a) * f;
+    });
+    left.on('end', () => { this.move.x = 0; this.move.z = 0; });
+
+    // ---- RIGHT: sword swing direction ----
+    const right = nipplejs.create({
+      zone: rightEl,
+      mode: 'semi',
+      catchDistance: 200,
+      color: '#ffd24a',
+      size: 140,
+      restJoystick: true,
+      restOpacity: 0.6,
+      threshold: 0.05,
+      fadeTime: 80,
+    });
+    right.on('start move', (e, d) => {
+      if (!d || !d.angle) return;
+      const a = d.angle.radian;
+      const f = Math.min(d.force, 1.8);
+      this._rightVec = { x: Math.cos(a) * f, y: Math.sin(a) * f };
+    });
+    right.on('end', () => {
+      // fire a slash in the held direction (or a default forward slash if tap)
+      const v = this._rightVec;
+      const mag = Math.hypot(v.x, v.y);
+      if (mag > 0.25) {
+        this.swingQueued = { dx: v.x, dy: v.y };
+      } else {
+        // simple tap = horizontal slash in facing direction (handled by fighter)
+        this.swingQueued = { dx: 1, dy: 0.3 };
+      }
+      this._rightVec = { x: 0, y: 0 };
+    });
+
+    this._joysticks = [left, right];
+
+    // Stop the canvas from receiving these touches and swallowing them.
+    // touch-action: none also prevents browser pinch/scroll on the pads.
+    for (const el of [leftEl, rightEl]) {
+      el.style.touchAction = 'none';
+      // Belt-and-suspenders: prevent default on touchstart so the
+      // browser doesn't fire synthesized mouseevents to the canvas.
+      el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+      el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    }
   }
 
   initDesktop(canvas) {
-    window.addEventListener('keydown', (e) => {
-      this._keys[e.code] = true;
-      if (e.code === 'Space') e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => { this._keys[e.code] = false; });
-
-    // mouse aim
-    this._mouse = { x: 0, y: 0 };
-    canvas.addEventListener('mousemove', (e) => {
-      const r = canvas.getBoundingClientRect();
-      this._mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
-      this._mouse.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
-    });
+    window.addEventListener('keydown', (e) => { this.keys[e.code] = true; });
+    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    // mouse: drag to swing
+    let down = false, sx = 0, sy = 0;
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        // swing toward mouse aim
-        this.state.swingDir = { x: this._mouse.x >= 0 ? 1 : -1, y: this._mouse.y };
-        this._swingQueued = true;
-      } else if (e.button === 2) {
-        this.state.block = true;
-      }
+      if (e.button === 2) { this.blocking = true; return; }
+      down = true; sx = e.clientX; sy = e.clientY;
     });
-    canvas.addEventListener('mouseup', (e) => { if (e.button === 2) this.state.block = false; });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 2) { this.blocking = false; return; }
+      if (down) {
+        const dx = e.clientX - sx, dy = sy - e.clientY;
+        if (Math.hypot(dx, dy) > 12) this.swingQueued = { dx, dy };
+        else this.swingQueued = { dx: 0, dy: 1 }; // tap = upward slash
+      }
+      down = false;
+    });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    this._desktop = true;
   }
 
-  poll() {
-    // desktop keyboard
-    if (!this.isTouch || this._keys) {
-      let mx = 0;
-      if (this._keys['KeyA'] || this._keys['ArrowLeft']) mx -= 1;
-      if (this._keys['KeyD'] || this._keys['ArrowRight']) mx += 1;
-      if (mx !== 0) this.state.moveX = mx;
-      else if (!this._moveJoy?.ids?.length && !this.isTouch) this.state.moveX = 0;
-
-      if (this._keys['KeyW'] || this._keys['ArrowUp'] || this._keys['Space']) this.state.jump = true;
-      this.state.block = !!(this._keys['ShiftLeft'] || this._keys['ShiftRight']) || this.state.block;
-      if (this._keys['KeyF']) { this._swingQueued = true; this.state.swingDir = { x: 1, y: 0.3 }; }
-
-      // aim with mouse
-      if (this._mouse) this.state.aimAngle = Math.atan2(this._mouse.y, this._mouse.x);
+  // wasdOnly=true is used in LOCAL-2P mode so arrow keys don't bleed into P1's
+  // movement (arrows are P2's controls there).
+  pollDesktop(wasdOnly = false) {
+    if (!this._desktop) return;
+    let x = 0, z = 0;
+    if (this.keys['KeyW']) z -= 1;
+    if (this.keys['KeyS']) z += 1;
+    if (this.keys['KeyA']) x -= 1;
+    if (this.keys['KeyD']) x += 1;
+    if (!wasdOnly) {
+      if (this.keys['ArrowUp']) z -= 1;
+      if (this.keys['ArrowDown']) z += 1;
+      if (this.keys['ArrowLeft']) x -= 1;
+      if (this.keys['ArrowRight']) x += 1;
     }
-
-    const out = { ...this.state };
-    out.swing = this._swingQueued;
-    this._swingQueued = false;
-    // consume one-frame flags
-    this.state.jump = false;
-    if (!this._keys['ShiftLeft'] && !this._keys['ShiftRight']) {
-      // block handled by buttons / rmb separately
-    }
-    return out;
+    const m = Math.hypot(x, z);
+    if (m > 0) { x /= m; z /= m; }
+    // only override touch move when keys pressed
+    if (m > 0 || this._lastKeyMove) { this.move.x = x; this.move.z = z; }
+    this._lastKeyMove = m > 0;
+    // F = swing forward; LeftShift = block
+    if (this.keys['KeyF']) this.swingQueued = { dx: 1, dy: 0.3 };
+    this.blocking = !!this.keys['ShiftLeft'];
   }
+
+  consumeSwing() { const s = this.swingQueued; this.swingQueued = null; return s; }
 
   destroy() {
-    this._moveJoy?.destroy();
-    this._swordJoy?.destroy();
+    for (const j of this._joysticks) try { j.destroy(); } catch (e) {}
+    this._joysticks = [];
   }
 }
