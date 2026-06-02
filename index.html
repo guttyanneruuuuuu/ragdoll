@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Ragdoll Blade Arena ⚔️</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>" />
+<link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+<div id="app">
+  <!-- ==================== GAME CANVAS ==================== -->
+  <canvas id="game"></canvas>
+
+  <!-- ==================== TOP HUD ==================== -->
+  <div id="hud" class="hidden">
+    <div class="hud-side hud-left">
+      <span class="hud-name" id="name1">You</span>
+      <div class="hud-pips" id="pips1"></div>
+    </div>
+    <div class="hud-center">
+      <div id="round-banner"></div>
+      <div class="hud-arena" id="hudArena"></div>
+    </div>
+    <div class="hud-side hud-right">
+      <span class="hud-name" id="name2">CPU</span>
+      <div class="hud-pips" id="pips2"></div>
+    </div>
+    <button id="pauseBtn" title="Pause">⏸</button>
+  </div>
+
+  <!-- ==================== TOUCH CONTROLS ==================== -->
+  <div id="touch" class="hidden">
+    <div class="touch-group touch-left" data-player="0">
+      <button class="tbtn" data-act="left">◀</button>
+      <button class="tbtn" data-act="right">▶</button>
+    </div>
+    <div class="touch-group touch-right" data-player="0">
+      <button class="tbtn" data-act="jump">▲</button>
+      <button class="tbtn tbtn-attack" data-act="swing">⚔</button>
+    </div>
+  </div>
+
+  <!-- ==================== MAIN MENU ==================== -->
+  <div id="menu" class="overlay">
+    <div class="menu-card">
+      <h1 class="logo">RAGDOLL<span>BLADE</span>ARENA</h1>
+      <p class="tagline">物理演算で斬り合え。一刀両断のラグドール格闘！</p>
+
+      <div class="menu-buttons">
+        <button class="btn btn-primary" data-screen="ai">🤖 AI対戦 (1P)</button>
+        <button class="btn btn-primary" data-screen="versus">👥 友達対戦 (2P)</button>
+        <button class="btn btn-ghost" data-screen="howto">📖 遊び方</button>
+      </div>
+      <div class="credit">An original physics fighter · made for the browser</div>
+    </div>
+  </div>
+
+  <!-- ==================== AI SETUP ==================== -->
+  <div id="screen-ai" class="overlay hidden">
+    <div class="menu-card">
+      <button class="back" data-back>← 戻る</button>
+      <h2>AI対戦の設定</h2>
+
+      <label class="field-label">難易度</label>
+      <div class="choice-row" id="difficulty">
+        <button class="chip" data-val="easy">かんたん</button>
+        <button class="chip active" data-val="normal">ふつう</button>
+        <button class="chip" data-val="hard">むずかしい</button>
+      </div>
+
+      <label class="field-label">アリーナ</label>
+      <div class="choice-row" id="arena-ai"></div>
+
+      <label class="field-label">勝利数 (Best of)</label>
+      <div class="choice-row" id="bestof-ai">
+        <button class="chip" data-val="1">1本</button>
+        <button class="chip active" data-val="3">3本</button>
+        <button class="chip" data-val="5">5本</button>
+      </div>
+
+      <button class="btn btn-primary big" id="startAI">⚔️ 試合開始</button>
+    </div>
+  </div>
+
+  <!-- ==================== VERSUS SETUP ==================== -->
+  <div id="screen-versus" class="overlay hidden">
+    <div class="menu-card">
+      <button class="back" data-back>← 戻る</button>
+      <h2>友達対戦 (2P ローカル)</h2>
+
+      <div class="controls-info">
+        <div class="ctrl-col p1">
+          <h3>🟡 Player 1</h3>
+          <p><kbd>A</kbd><kbd>D</kbd> 移動</p>
+          <p><kbd>W</kbd> ジャンプ</p>
+          <p><kbd>F</kbd> / <kbd>Space</kbd> 斬る</p>
+        </div>
+        <div class="ctrl-col p2">
+          <h3>🔵 Player 2</h3>
+          <p><kbd>←</kbd><kbd>→</kbd> 移動</p>
+          <p><kbd>↑</kbd> ジャンプ</p>
+          <p><kbd>Enter</kbd> / <kbd>.</kbd> 斬る</p>
+        </div>
+      </div>
+
+      <label class="field-label">アリーナ</label>
+      <div class="choice-row" id="arena-vs"></div>
+
+      <label class="field-label">勝利数 (Best of)</label>
+      <div class="choice-row" id="bestof-vs">
+        <button class="chip" data-val="1">1本</button>
+        <button class="chip active" data-val="3">3本</button>
+        <button class="chip" data-val="5">5本</button>
+      </div>
+
+      <button class="btn btn-primary big" id="startVS">⚔️ 試合開始</button>
+    </div>
+  </div>
+
+  <!-- ==================== HOW TO PLAY ==================== -->
+  <div id="screen-howto" class="overlay hidden">
+    <div class="menu-card">
+      <button class="back" data-back>← 戻る</button>
+      <h2>遊び方</h2>
+      <div class="howto">
+        <p>🗡️ <b>目的：</b> 剣で相手のラグドールを斬り、首や胴体を切断すれば勝ち！</p>
+        <p>🦿 <b>切断ダメージ：</b> 手足を斬られると、そのジョイントが動かせなくなる。立て直せ！</p>
+        <p>⚔️ <b>つばぜり合い：</b> 剣同士がぶつかると火花が散って弾かれる。</p>
+        <p>🏃 <b>操作：</b> 物理ベースなので動きはユーモラス。タイミングが命。</p>
+        <p>📱 <b>スマホ：</b> 画面下のボタンで操作できます (1P時)。</p>
+      </div>
+      <button class="btn btn-primary" data-back>OK!</button>
+    </div>
+  </div>
+
+  <!-- ==================== PAUSE ==================== -->
+  <div id="screen-pause" class="overlay hidden">
+    <div class="menu-card small">
+      <h2>一時停止</h2>
+      <button class="btn btn-primary" id="resumeBtn">▶ 再開</button>
+      <button class="btn btn-ghost" id="quitBtn">🏠 メニューへ</button>
+      <label class="toggle"><input type="checkbox" id="soundToggle" checked /> サウンド</label>
+    </div>
+  </div>
+
+  <!-- ==================== ROUND / MATCH RESULT ==================== -->
+  <div id="screen-result" class="overlay hidden">
+    <div class="menu-card">
+      <h2 id="resultTitle">勝者！</h2>
+      <p id="resultSub"></p>
+      <button class="btn btn-primary" id="rematchBtn">🔁 もう一戦</button>
+      <button class="btn btn-ghost" id="resultMenuBtn">🏠 メニューへ</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
