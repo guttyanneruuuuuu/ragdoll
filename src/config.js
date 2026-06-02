@@ -1,88 +1,77 @@
 // ============================================================
-// Global configuration & tuning constants
+// Central config: weapons, stages, colors, tuning constants.
+// All gameplay numbers live here so balancing is one-stop.
 // ============================================================
 
-export const PHYS = {
-  GRAVITY: -22.0,
-  TIMESTEP: 1 / 60,
-  SUBSTEPS: 2,
+export const WORLD = {
+  gravity: -38,          // verlet gravity (units/s^2-ish, tuned for feel)
+  ground: 0,             // ground plane y
+  arenaRadius: 11,       // ring-out radius for "arena" stage
+  damping: 0.86,         // velocity damping per substep
+  groundFriction: 0.78,  // horizontal friction when touching ground
+  substeps: 3,           // physics substeps per frame
+  constraintIters: 12,   // stick constraint relaxation iterations
 };
 
-// Body part colors per fighter
-export const FIGHTER_COLORS = {
-  p1: 0xffd633, // yellow
-  p2: 0xff3b5c, // red
-};
-
-// Weapon definitions — reach, mass, swingPower, damage
+// Weapon definitions. reach = blade length, mass affects swing inertia,
+// dmg = energy delivered per unit of impact speed.
 export const WEAPONS = {
-  katana: {
-    name: '刀', bladeLen: 1.15, bladeWidth: 0.05, mass: 1.0,
-    swingPower: 1.0, damage: 1.0, color: 0xdfe6f0, guardColor: 0x222233,
-    handleLen: 0.28,
-  },
-  greatsword: {
-    name: '大剣', bladeLen: 1.6, bladeWidth: 0.11, mass: 2.2,
-    swingPower: 1.35, damage: 1.5, color: 0xc9d2e0, guardColor: 0x3a2a1a,
-    handleLen: 0.42,
-  },
-  spear: {
-    name: '槍', bladeLen: 1.9, bladeWidth: 0.04, mass: 1.3,
-    swingPower: 0.85, damage: 1.1, color: 0xe2e8f2, guardColor: 0x4a3520,
-    handleLen: 0.6, isThrust: true,
-  },
-  hammer: {
-    name: 'ハンマー', bladeLen: 1.1, bladeWidth: 0.22, mass: 3.0,
-    swingPower: 1.6, damage: 1.8, color: 0x8893a5, guardColor: 0x2a2a2a,
-    handleLen: 0.5, blunt: true,
+  katana:  { name: '刀',     reach: 2.2, mass: 1.0, dmg: 1.0,  color: 0xdfe6ee, width: 0.10, swing: 1.25 },
+  greatsword:{ name: '大剣', reach: 2.9, mass: 1.7, dmg: 1.5,  color: 0xc7cdd6, width: 0.18, swing: 0.85 },
+  rapier:  { name: 'レイピア', reach: 2.5, mass: 0.7, dmg: 0.8,  color: 0xe9eef5, width: 0.06, swing: 1.55 },
+  axe:     { name: '斧',     reach: 1.9, mass: 1.9, dmg: 1.7,  color: 0xb9b2a7, width: 0.22, swing: 0.8 },
+  spear:   { name: '槍',     reach: 3.2, mass: 1.1, dmg: 1.1,  color: 0xd8cbb0, width: 0.07, swing: 1.0 },
+  hammer:  { name: 'ハンマー', reach: 1.8, mass: 2.3, dmg: 2.0,  color: 0x9aa0a8, width: 0.30, swing: 0.7 },
+};
+
+export const STAGES = {
+  arena:   { name: 'ネオン闘技場', ground: 0x161a2e, accent: 0x00e5ff, sky: 0x0a0c1a, ringOut: true,  fog: 0x0a0c1a, hazard: null },
+  meadow:  { name: '草原',         ground: 0x4caf50, accent: 0xfff3b0, sky: 0x9fd6ff, ringOut: false, fog: 0xbfe6ff, hazard: null },
+  cliff:   { name: '断崖',         ground: 0x6d5a44, accent: 0xff8a3d, sky: 0xffc48a, ringOut: true,  fog: 0xffd9a8, hazard: 'cliff' },
+  saw:     { name: '回転刃',       ground: 0x20242e, accent: 0xff3b5c, sky: 0x12141c, ringOut: true,  fog: 0x12141c, hazard: 'saw' },
+};
+
+// Body part radii / sizes used by both physics & visuals.
+export const BODY = {
+  // node name -> radius (for collision & sphere visual)
+  head:  0.42,
+  chest: 0.40,
+  hip:   0.36,
+  hand:  0.16,
+  foot:  0.18,
+  // bone (stick) rest lengths
+  bones: {
+    neck:    [ 'head',  'chest', 0.62 ],
+    spine:   [ 'chest', 'hip',   0.78 ],
+    armL:    [ 'chest', 'handL', 1.15 ],
+    armR:    [ 'chest', 'handR', 1.15 ],
+    legL:    [ 'hip',   'footL', 1.25 ],
+    legR:    [ 'hip',   'footR', 1.25 ],
   },
 };
 
-// Body part identifiers
-export const PART = {
-  HEAD: 'head',
-  TORSO: 'torso',
-  PELVIS: 'pelvis',
-  UPPER_ARM_L: 'upperArmL',
-  LOWER_ARM_L: 'lowerArmL',
-  UPPER_ARM_R: 'upperArmR',
-  LOWER_ARM_R: 'lowerArmR',
-  UPPER_LEG_L: 'upperLegL',
-  LOWER_LEG_L: 'lowerLegL',
-  UPPER_LEG_R: 'upperLegR',
-  LOWER_LEG_R: 'lowerLegR',
-};
-
-// Damage thresholds — how much accumulated hit energy locks/severs a joint
 export const DAMAGE = {
-  LOCK_THRESHOLD: 30,    // joint stops working (joint-lock)
-  SEVER_THRESHOLD: 70,   // limb detaches
-  HEAD_KILL: 55,         // headshot lethal
-  TORSO_KILL: 130,       // body-cut lethal
-  HIT_BASE: 22,          // base hit energy
+  // impact speed above this counts as a hit
+  hitThreshold: 9.0,
+  // energy needed to lock a joint
+  lockEnergy: 22,
+  // energy needed to sever (visually detach + heavy stagger)
+  severEnergy: 46,
+  // KO when this many joints locked OR head/hip severed
+  koLockedJoints: 4,
+  // self-stagger time on big hit (seconds)
+  staggerTime: 0.55,
 };
 
-export const MATCH = {
-  ROUNDS_TO_WIN: 2,      // best of 3
-  ROUND_TIME: 60,        // seconds (0 = infinite)
+export const COLORS = {
+  p1: 0xffd633,   // classic ragdoll yellow
+  p2: 0xff5a4d,   // red rival
+  stump: 0xcc2222,
 };
 
-// AI difficulty profiles
 export const AI_PROFILES = {
-  easy:   { react: 0.55, aggression: 0.4, accuracy: 0.55, blockChance: 0.15, swingCooldown: 1.1 },
-  normal: { react: 0.32, aggression: 0.62, accuracy: 0.72, blockChance: 0.35, swingCooldown: 0.75 },
-  hard:   { react: 0.18, aggression: 0.8, accuracy: 0.86, blockChance: 0.55, swingCooldown: 0.5 },
-  insane: { react: 0.08, aggression: 0.95, accuracy: 0.96, blockChance: 0.75, swingCooldown: 0.32 },
-};
-
-export const NET = {
-  // public signaling/relay server. Falls back to same-origin in production.
-  SIGNAL_URL: (() => {
-    const host = location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') return `ws://${location.hostname}:8787`;
-    // same origin, ws path
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${location.host}/ws`;
-  })(),
-  TICK: 20,            // network broadcast Hz
+  easy:   { react: 0.55, aggression: 0.4, swingPower: 0.7,  dodge: 0.15, label: 'EASY' },
+  normal: { react: 0.32, aggression: 0.65, swingPower: 1.0, dodge: 0.35, label: 'NORMAL' },
+  hard:   { react: 0.16, aggression: 0.85, swingPower: 1.25, dodge: 0.6, label: 'HARD' },
+  insane: { react: 0.08, aggression: 1.0, swingPower: 1.5,  dodge: 0.8,  label: 'INSANE' },
 };

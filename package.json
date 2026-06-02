@@ -1,7 +1,7 @@
 {
   "name": "ragdoll-blade-arena",
-  "version": "2.0.0",
-  "description": "3D browser-based ragdoll physics sword-fighting game with online friend battles and AI opponents",
+  "version": "3.0.0",
+  "description": "3D browser-based ragdoll physics sword-fighting game — virtual joystick controls, online friend battles, and AI opponents. Fast-loading custom verlet physics, no WASM.",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
@@ -10,16 +10,24 @@
     "server": "node server/index.js",
     "start": "node server/index.js"
   },
-  "keywords": ["ragdoll", "game", "threejs", "rapier", "physics", "multiplayer", "sword"],
+  "keywords": [
+    "ragdoll",
+    "game",
+    "threejs",
+    "physics",
+    "multiplayer",
+    "sword",
+    "verlet"
+  ],
   "author": "guttyanneruuuuuu",
   "license": "MIT",
   "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.14.0",
-    "three": "^0.169.0",
     "nipplejs": "^0.10.2",
+    "three": "^0.169.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "playwright": "^1.60.0",
     "vite": "^5.4.0"
   }
 }

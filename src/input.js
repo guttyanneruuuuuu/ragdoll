@@ -1,127 +1,95 @@
 // ============================================================
-// Input — virtual joysticks (touch) + keyboard/mouse (desktop)
-// Produces a normalized control state consumed by the local fighter.
+// Input — dual virtual joysticks (move + sword) via nipplejs,
+// plus desktop keyboard/mouse fallback.
+//   left stick  -> movement direction
+//   right stick -> sword swing direction (release = slash)
 // ============================================================
 import nipplejs from 'nipplejs';
 
 export class InputManager {
   constructor() {
-    this.state = {
-      moveX: 0,          // -1..1
-      jump: false,
-      block: false,
-      swing: false,      // edge-triggered (consumed)
-      swingDir: { x: 1, y: 0 },  // direction of sword swing
-      aimAngle: 0,
-    };
-    this._keys = {};
-    this._moveJoy = null;
-    this._swordJoy = null;
-    this._swingQueued = false;
-    this.isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    this.move = { x: 0, z: 0 };
+    this.swingQueued = null;     // {dx,dy} when a swing is fired
+    this.blocking = false;
+    this._rightVec = { x: 0, y: 0 };
+    this._joysticks = [];
+    this.keys = {};
   }
 
-  initTouch() {
-    const moveZone = document.getElementById('joystick-move');
-    const swordZone = document.getElementById('joystick-sword');
+  initTouch(leftEl, rightEl) {
+    this.destroy();
+    const left = nipplejs.create({
+      zone: leftEl, mode: 'static', position: { left: '50%', top: '50%' },
+      color: '#00e5ff', size: 110,
+    });
+    left.on('move', (e, d) => {
+      const a = d.angle.radian;
+      const f = Math.min(d.force, 1.2);
+      this.move.x = Math.cos(a) * f;
+      this.move.z = -Math.sin(a) * f;
+    });
+    left.on('end', () => { this.move.x = 0; this.move.z = 0; });
 
-    this._moveJoy = nipplejs.create({
-      zone: moveZone, mode: 'static', position: { left: '50%', top: '55%' },
-      color: 'rgba(0,229,255,0.6)', size: 110,
+    const right = nipplejs.create({
+      zone: rightEl, mode: 'static', position: { left: '50%', top: '50%' },
+      color: '#ffd24a', size: 120,
     });
-    this._moveJoy.on('move', (e, d) => {
-      this.state.moveX = Math.cos(d.angle.radian) * Math.min(1, d.distance / 50);
-      if (d.vector.y > 0.6) this.state.jump = true;
+    right.on('move', (e, d) => {
+      const a = d.angle.radian;
+      const f = Math.min(d.force, 1.5);
+      this._rightVec = { x: Math.cos(a) * f, y: Math.sin(a) * f };
     });
-    this._moveJoy.on('end', () => { this.state.moveX = 0; });
-
-    this._swordJoy = nipplejs.create({
-      zone: swordZone, mode: 'static', position: { left: '50%', top: '55%' },
-      color: 'rgba(255,45,117,0.6)', size: 120,
-    });
-    let lastDir = { x: 1, y: 0 };
-    this._swordJoy.on('move', (e, d) => {
-      const x = Math.cos(d.angle.radian);
-      const y = Math.sin(d.angle.radian);
-      lastDir = { x, y };
-      this.state.aimAngle = Math.atan2(y, x);
-    });
-    this._swordJoy.on('end', () => {
-      // releasing the sword stick triggers a swing in last direction
-      this.state.swingDir = { ...lastDir };
-      this._swingQueued = true;
+    right.on('end', () => {
+      // fire a slash in the held direction
+      const v = this._rightVec;
+      if (Math.hypot(v.x, v.y) > 0.3) this.swingQueued = { dx: v.x, dy: v.y };
+      this._rightVec = { x: 0, y: 0 };
     });
 
-    // action buttons
-    const jumpBtn = document.getElementById('btn-jump');
-    const blockBtn = document.getElementById('btn-block');
-    const press = (el, on, off) => {
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); on(); }, { passive: false });
-      el.addEventListener('touchend', (e) => { e.preventDefault(); off?.(); }, { passive: false });
-      el.addEventListener('mousedown', on);
-      el.addEventListener('mouseup', () => off?.());
-    };
-    press(jumpBtn, () => { this.state.jump = true; });
-    press(blockBtn, () => { this.state.block = true; }, () => { this.state.block = false; });
+    this._joysticks = [left, right];
   }
 
   initDesktop(canvas) {
-    window.addEventListener('keydown', (e) => {
-      this._keys[e.code] = true;
-      if (e.code === 'Space') e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => { this._keys[e.code] = false; });
-
-    // mouse aim
-    this._mouse = { x: 0, y: 0 };
-    canvas.addEventListener('mousemove', (e) => {
-      const r = canvas.getBoundingClientRect();
-      this._mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
-      this._mouse.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
-    });
+    window.addEventListener('keydown', (e) => { this.keys[e.code] = true; });
+    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    // mouse: drag to swing
+    let down = false, sx = 0, sy = 0;
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        // swing toward mouse aim
-        this.state.swingDir = { x: this._mouse.x >= 0 ? 1 : -1, y: this._mouse.y };
-        this._swingQueued = true;
-      } else if (e.button === 2) {
-        this.state.block = true;
-      }
+      if (e.button === 2) { this.blocking = true; return; }
+      down = true; sx = e.clientX; sy = e.clientY;
     });
-    canvas.addEventListener('mouseup', (e) => { if (e.button === 2) this.state.block = false; });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 2) { this.blocking = false; return; }
+      if (down) {
+        const dx = e.clientX - sx, dy = sy - e.clientY;
+        if (Math.hypot(dx, dy) > 12) this.swingQueued = { dx, dy };
+        else this.swingQueued = { dx: 0, dy: 1 }; // tap = upward slash
+      }
+      down = false;
+    });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    this._desktop = true;
   }
 
-  poll() {
-    // desktop keyboard
-    if (!this.isTouch || this._keys) {
-      let mx = 0;
-      if (this._keys['KeyA'] || this._keys['ArrowLeft']) mx -= 1;
-      if (this._keys['KeyD'] || this._keys['ArrowRight']) mx += 1;
-      if (mx !== 0) this.state.moveX = mx;
-      else if (!this._moveJoy?.ids?.length && !this.isTouch) this.state.moveX = 0;
-
-      if (this._keys['KeyW'] || this._keys['ArrowUp'] || this._keys['Space']) this.state.jump = true;
-      this.state.block = !!(this._keys['ShiftLeft'] || this._keys['ShiftRight']) || this.state.block;
-      if (this._keys['KeyF']) { this._swingQueued = true; this.state.swingDir = { x: 1, y: 0.3 }; }
-
-      // aim with mouse
-      if (this._mouse) this.state.aimAngle = Math.atan2(this._mouse.y, this._mouse.x);
-    }
-
-    const out = { ...this.state };
-    out.swing = this._swingQueued;
-    this._swingQueued = false;
-    // consume one-frame flags
-    this.state.jump = false;
-    if (!this._keys['ShiftLeft'] && !this._keys['ShiftRight']) {
-      // block handled by buttons / rmb separately
-    }
-    return out;
+  pollDesktop() {
+    if (!this._desktop) return;
+    let x = 0, z = 0;
+    if (this.keys['KeyW'] || this.keys['ArrowUp']) z -= 1;
+    if (this.keys['KeyS'] || this.keys['ArrowDown']) z += 1;
+    if (this.keys['KeyA'] || this.keys['ArrowLeft']) x -= 1;
+    if (this.keys['KeyD'] || this.keys['ArrowRight']) x += 1;
+    const m = Math.hypot(x, z);
+    if (m > 0) { x /= m; z /= m; }
+    // only override touch move when keys pressed
+    if (m > 0 || this._lastKeyMove) { this.move.x = x; this.move.z = z; }
+    this._lastKeyMove = m > 0;
+    this.blocking = this.blocking || !!this.keys['Space'];
   }
+
+  consumeSwing() { const s = this.swingQueued; this.swingQueued = null; return s; }
 
   destroy() {
-    this._moveJoy?.destroy();
-    this._swordJoy?.destroy();
+    for (const j of this._joysticks) try { j.destroy(); } catch (e) {}
+    this._joysticks = [];
   }
 }

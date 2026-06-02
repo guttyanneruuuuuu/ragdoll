@@ -1,127 +1,70 @@
 // ============================================================
-// Networking — WebSocket relay client for online friend battles.
-// Host is physics-authority; guest sends inputs, host broadcasts
-// authoritative snapshots. Falls back gracefully if server down.
+// Network client — WebSocket relay for friend battles.
+// Room codes; host is authoritative for match flow.
+// Falls back gracefully when no server is reachable.
 // ============================================================
-import { NET } from './config.js';
 
 export class NetClient {
   constructor() {
     this.ws = null;
-    this.isHost = false;
-    this.roomCode = null;
     this.connected = false;
-    this.peerJoined = false;
+    this.room = null;
+    this.id = null;
+    this.isHost = false;
     this.handlers = {};
-    this._tickAcc = 0;
-    this._pingTimer = null;
-    this.ping = 0;
+    this.peers = {};
   }
 
-  on(event, cb) { this.handlers[event] = cb; }
-  _emit(event, ...a) { this.handlers[event]?.(...a); }
+  on(ev, fn) { (this.handlers[ev] ||= []).push(fn); }
+  emit(ev, data) { (this.handlers[ev] || []).forEach(f => f(data)); }
+
+  url() {
+    // same-origin ws, path /ws — works behind the sandbox proxy
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${location.host}/ws`;
+  }
 
   connect() {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(NET.SIGNAL_URL);
+        this.ws = new WebSocket(this.url());
       } catch (e) { reject(e); return; }
-      const to = setTimeout(() => reject(new Error('connection timeout')), 6000);
-      this.ws.onopen = () => { clearTimeout(to); this.connected = true; this._startPing(); resolve(); };
+      const to = setTimeout(() => { reject(new Error('timeout')); }, 6000);
+      this.ws.onopen = () => { clearTimeout(to); this.connected = true; resolve(); };
       this.ws.onerror = (e) => { clearTimeout(to); reject(e); };
-      this.ws.onclose = () => { this.connected = false; this._emit('disconnect'); if (this._pingTimer) clearInterval(this._pingTimer); };
-      this.ws.onmessage = (ev) => this._handle(JSON.parse(ev.data));
+      this.ws.onclose = () => { this.connected = false; this.emit('close'); };
+      this.ws.onmessage = (e) => {
+        let msg; try { msg = JSON.parse(e.data); } catch { return; }
+        this.handle(msg);
+      };
     });
   }
 
-  _send(obj) { if (this.ws && this.connected) this.ws.send(JSON.stringify(obj)); }
-
-  _startPing() {
-    this._pingTimer = setInterval(() => {
-      this._pingSent = performance.now();
-      this._send({ t: 'ping' });
-    }, 2000);
+  send(type, data = {}) {
+    if (this.ws && this.connected) this.ws.send(JSON.stringify({ type, ...data }));
   }
 
-  createRoom(name, weapon) {
-    this.isHost = true;
-    this.playerName = name; this.weapon = weapon;
-    this._send({ t: 'create', name, weapon });
-  }
-
-  joinRoom(code, name, weapon) {
-    this.isHost = false;
-    this.playerName = name; this.weapon = weapon; this.roomCode = code;
-    this._send({ t: 'join', code, name, weapon });
-  }
-
-  _handle(msg) {
-    switch (msg.t) {
-      case 'created':
-        this.roomCode = msg.code;
-        this._emit('roomCreated', msg.code);
-        break;
-      case 'joined':
-        // guest received confirmation + host info
-        this._emit('joinedRoom', msg);
-        break;
-      case 'peerJoined':
-        this.peerJoined = true;
-        this._emit('peerJoined', msg);
-        break;
-      case 'start':
-        this._emit('matchStart', msg);
-        break;
-      case 'input':
-        this._emit('remoteInput', msg.data);
-        break;
-      case 'swing':
-        this._emit('remoteSwing', msg.data);
-        break;
-      case 'snapshot':
-        this._emit('snapshot', msg.data);
-        break;
-      case 'roundEnd':
-        this._emit('roundEnd', msg.winner, msg.scores);
-        break;
-      case 'peerLeft':
-        this._emit('peerLeft');
-        break;
-      case 'error':
-        this._emit('netError', msg.msg);
-        break;
-      case 'pong':
-        if (this._pingSent) this.ping = Math.round(performance.now() - this._pingSent);
-        break;
+  handle(msg) {
+    switch (msg.type) {
+      case 'welcome': this.id = msg.id; break;
+      case 'created': this.room = msg.room; this.isHost = true; this.emit('created', msg); break;
+      case 'joined': this.room = msg.room; this.isHost = false; this.emit('joined', msg); break;
+      case 'peer-join': this.emit('peer-join', msg); break;
+      case 'peer-leave': this.emit('peer-leave', msg); break;
+      case 'start': this.emit('start', msg); break;
+      case 'state': this.emit('state', msg); break;
+      case 'input': this.emit('input', msg); break;
+      case 'event': this.emit('event', msg); break;
+      case 'error': this.emit('neterror', msg); break;
+      case 'rooms': this.emit('rooms', msg); break;
     }
   }
 
-  // ---- game-side API ----
-  sendInput(data) {
-    if (!this.isHost) this._send({ t: 'input', data });
-  }
-  sendSwing(dir) {
-    this._send({ t: 'swing', data: dir });
-  }
-  sendRoundEnd(winner, scores) {
-    if (this.isHost) this._send({ t: 'roundEnd', winner, scores });
-  }
-
-  // host broadcasts authoritative snapshot at NET.TICK Hz
-  tick(dt, fighters) {
-    if (!this.isHost) return;
-    this._tickAcc += dt;
-    if (this._tickAcc < 1 / NET.TICK) return;
-    this._tickAcc = 0;
-    const data = {
-      a: fighters[0].doll.snapshot(),
-      b: fighters[1].doll.snapshot(),
-    };
-    this._send({ t: 'snapshot', data });
-  }
-
-  close() {
-    if (this._pingTimer) clearInterval(this._pingTimer);
-    this.ws?.close();
-  }
+  createRoom(name, opts) { this.send('create', { name, opts }); }
+  joinRoom(code, name) { this.send('join', { room: code.toUpperCase(), name }); }
+  leave() { this.send('leave'); this.room = null; }
+  startMatch(opts) { this.send('start', { opts }); }
+  sendState(s) { this.send('state', { s }); }
+  sendInput(i) { this.send('input', { i }); }
+  sendEvent(e) { this.send('event', { e }); }
 }

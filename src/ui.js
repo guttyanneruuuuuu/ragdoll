@@ -1,209 +1,179 @@
 // ============================================================
-// UI manager — DOM screens, HUD, menus, transitions
+// UIManager — screens, HUD, event bus between DOM and game.
 // ============================================================
-import { PART } from './config.js';
-import { InputManager } from './input.js';
-
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
-
-const LIMB_GROUPS = [
-  { key: PART.HEAD, icon: '🙂' },
-  { key: PART.UPPER_ARM_R, icon: '💪' },
-  { key: PART.UPPER_ARM_L, icon: '🤚' },
-  { key: PART.UPPER_LEG_R, icon: '🦵' },
-  { key: PART.UPPER_LEG_L, icon: '🦶' },
-];
+import { WEAPONS, STAGES, AI_PROFILES } from './config.js';
 
 export class UIManager {
   constructor() {
-    this.input = new InputManager();
-    this.callbacks = {};
-    this._buildHandlers();
-    this._initLimbDots();
+    this.handlers = {};
+    this.screens = {};
+    this.input = null;
+    document.querySelectorAll('[data-screen]').forEach(el => { this.screens[el.dataset.screen] = el; });
+    this.bind();
+  }
+  on(ev, fn) { (this.handlers[ev] ||= []).push(fn); }
+  emit(ev, data) { (this.handlers[ev] || []).forEach(f => f(data)); }
 
-    // damage flash element
-    this.flash = document.createElement('div');
-    this.flash.className = 'dmg-flash';
-    document.getElementById('app').appendChild(this.flash);
+  show(name) {
+    // hide the boot loading overlay once any screen is shown
+    document.getElementById('loading')?.classList.remove('show');
+    for (const [k, el] of Object.entries(this.screens)) el.classList.toggle('active', k === name);
+    document.getElementById('touch-controls').style.display = name === 'game' ? 'block' : 'none';
+    document.getElementById('hud').style.display = name === 'game' ? 'flex' : 'none';
+    document.getElementById('btn-pause').style.display = name === 'game' ? 'block' : 'none';
+  }
+  hide(name) { this.screens[name]?.classList.remove('active'); }
+
+  setLoading(pct, text) {
+    const bar = document.getElementById('load-bar');
+    const txt = document.getElementById('load-text');
+    if (bar) bar.style.width = pct + '%';
+    if (txt && text) txt.textContent = text;
   }
 
-  on(event, cb) { this.callbacks[event] = cb; }
-  _emit(event, ...args) { this.callbacks[event]?.(...args); }
+  bind() {
+    const $ = (id) => document.getElementById(id);
+    const click = (id, fn) => { const e = $(id); if (e) e.addEventListener('click', () => { this.emit('userInteract'); fn(); }); };
 
-  _buildHandlers() {
-    // menu mode buttons
-    $$('#menu .btn').forEach(b => b.addEventListener('click', () => {
-      const mode = b.dataset.mode;
-      this._emit('userInteract');
-      if (mode === 'ai') this.show('ai-setup');
-      else if (mode === 'online') this.show('online-setup');
-      else if (mode === 'practice') this._emit('startPractice');
-    }));
+    // main menu
+    click('btn-ai', () => this.show('ai-setup'));
+    click('btn-local', () => this.show('local-setup'));
+    click('btn-online', () => this.show('online-setup'));
+    click('btn-howto', () => this.show('howto'));
+    document.querySelectorAll('[data-back]').forEach(b =>
+      b.addEventListener('click', () => this.show(b.dataset.back)));
 
-    // back buttons
-    $$('[data-back]').forEach(b => b.addEventListener('click', () => this.show('menu')));
+    // populate weapon & stage selectors
+    this.fillSelect('ai-weapon', WEAPONS, k => WEAPONS[k].name);
+    this.fillSelect('ai-stage', STAGES, k => STAGES[k].name);
+    this.fillSelect('local-weapon1', WEAPONS, k => WEAPONS[k].name);
+    this.fillSelect('local-weapon2', WEAPONS, k => WEAPONS[k].name);
+    this.fillSelect('local-stage', STAGES, k => STAGES[k].name);
+    this.fillSelect('online-weapon', WEAPONS, k => WEAPONS[k].name);
+    this.fillSelect('online-stage', STAGES, k => STAGES[k].name);
 
-    // segmented controls
-    $$('.seg').forEach(seg => {
-      seg.addEventListener('click', (e) => {
-        const btn = e.target.closest('button'); if (!btn) return;
-        seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-        btn.classList.add('active');
+    // AI difficulty buttons
+    document.querySelectorAll('#ai-diff .diff-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('#ai-diff .diff-btn').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
       });
     });
 
-    // AI start
-    $('#start-ai').addEventListener('click', () => {
-      const difficulty = $('#difficulty .active').dataset.val;
-      const weapon = $('#weapon-ai .active').dataset.val;
-      const stage = $('#stage-ai .active').dataset.val;
-      this._emit('startAI', { difficulty, weapon, stage });
+    click('ai-start', () => {
+      const difficulty = document.querySelector('#ai-diff .diff-btn.sel')?.dataset.diff || 'normal';
+      this.emit('startAI', { difficulty, weapon: $('ai-weapon').value, stage: $('ai-stage').value });
+    });
+
+    click('local-start', () => {
+      this.emit('startLocal', {
+        weapons: [$('local-weapon1').value, $('local-weapon2').value],
+        stage: $('local-stage').value,
+      });
     });
 
     // online tabs
-    $$('.online-tabs .tab').forEach(t => t.addEventListener('click', () => {
-      $$('.online-tabs .tab').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      const tab = t.dataset.tab;
-      $$('.tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.content !== tab));
+    document.querySelectorAll('.online-tabs .tab').forEach(t => {
+      t.addEventListener('click', () => {
+        document.querySelectorAll('.online-tabs .tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        $('host-panel').style.display = t.dataset.tab === 'host' ? 'block' : 'none';
+        $('join-panel').style.display = t.dataset.tab === 'join' ? 'block' : 'none';
+      });
+    });
+    click('host-create', () => this.emit('hostRoom', {
+      name: $('host-name').value || 'Host',
+      weapon: $('online-weapon').value, stage: $('online-stage').value,
     }));
-
-    // online create / join
-    $('#create-room').addEventListener('click', () => {
-      const name = $('#player-name').value.trim() || 'Player';
-      const weapon = $('#weapon-host .active').dataset.val;
-      this._emit('createRoom', { name, weapon });
-    });
-    $('#join-room').addEventListener('click', () => {
-      const name = $('#player-name').value.trim() || 'Player';
-      const code = $('#join-code').value.trim().toUpperCase();
-      const weapon = $('#weapon-guest .active').dataset.val;
-      this._emit('joinRoom', { name, code, weapon });
-    });
-    $('#copy-link').addEventListener('click', () => {
-      const code = $('#room-code').textContent;
-      const url = `${location.origin}${location.pathname}?room=${code}`;
-      navigator.clipboard?.writeText(url);
-      $('#copy-link').textContent = '✓ コピーしました';
-      setTimeout(() => { $('#copy-link').textContent = '🔗 招待リンクをコピー'; }, 1500);
+    click('join-go', () => this.emit('joinRoom', {
+      code: $('join-code').value, name: $('join-name').value || 'Guest',
+    }));
+    click('online-start-match', () => this.emit('onlineStart'));
+    click('copy-link', () => {
+      const code = $('room-code-display').textContent;
+      const link = `${location.origin}${location.pathname}?room=${code}`;
+      navigator.clipboard?.writeText(link);
+      const btn = $('copy-link'); const o = btn.textContent;
+      btn.textContent = 'コピーしました！'; setTimeout(() => btn.textContent = o, 1500);
     });
 
-    // pause
-    $('#pause-btn').addEventListener('click', () => this._emit('togglePause'));
-
-    // result
-    $('#rematch').addEventListener('click', () => { this.hide('result'); this._emit('rematch'); });
-    $('#to-menu').addEventListener('click', () => { this.hide('result'); this.hideHUD(); this._emit('toMenu'); });
+    // pause / result
+    click('btn-pause', () => { $('pause-overlay').classList.add('show'); });
+    click('resume', () => { $('pause-overlay').classList.remove('show'); });
+    click('quit', () => { $('pause-overlay').classList.remove('show'); this.emit('quit'); });
+    click('result-menu', () => { $('result-overlay').classList.remove('show'); this.emit('quit'); });
+    click('result-rematch', () => { $('result-overlay').classList.remove('show'); this.emit('rematch'); });
   }
 
-  _initLimbDots() {
-    for (const side of ['1', '2']) {
-      const el = document.getElementById('limbs' + side);
-      el.innerHTML = '';
-      for (const g of LIMB_GROUPS) {
-        const d = document.createElement('div');
-        d.className = 'limb-dot';
-        d.dataset.part = g.key;
-        d.textContent = g.icon;
-        el.appendChild(d);
-      }
-    }
-  }
-
-  // ---- screen management ----
-  show(id) {
-    ['loading', 'menu', 'ai-setup', 'online-setup', 'result'].forEach(s => {
-      document.getElementById(s)?.classList.add('hidden');
-    });
-    document.getElementById(id)?.classList.remove('hidden');
-  }
-  hide(id) { document.getElementById(id)?.classList.add('hidden'); }
-
-  setLoading(pct, msg) {
-    $('#loading-fill').style.width = pct + '%';
-    if (msg) $('#loading-msg').textContent = msg;
-  }
-
-  showHUD(names, stage) {
-    $('#hud').classList.remove('hidden');
-    $('#hud-name1').textContent = names[0];
-    $('#hud-name2').textContent = names[1];
-    $('#pause-btn').style.display = 'block';
-    // controls
-    if (this.input.isTouch) {
-      $('#touch-controls').classList.remove('hidden');
-      this.input.initTouch();
-    } else {
-      $('#desktop-hint').classList.remove('hidden');
-    }
-  }
-
-  hideHUD() {
-    $('#hud').classList.add('hidden');
-    $('#touch-controls').classList.add('hidden');
-    $('#desktop-hint').classList.add('hidden');
-  }
-
-  setHealth(i, hp) {
-    const el = document.getElementById('health' + (i + 1));
-    if (el) el.style.width = (hp * 100) + '%';
-  }
-
-  setLimbs(i, doll) {
-    const el = document.getElementById('limbs' + (i + 1));
-    el.querySelectorAll('.limb-dot').forEach(d => {
-      const part = d.dataset.part;
-      d.classList.toggle('severed', doll.severed.has(part));
-      d.classList.toggle('broken', doll.locked.has(part) && !doll.severed.has(part));
-    });
-  }
-
-  setTimer(sec) { $('#match-timer').textContent = sec; }
-
-  updateRoundPips(scores, toWin) {
-    const total = toWin * 2 - 1;
-    const el = $('#round-pips');
+  fillSelect(id, map, label) {
+    const el = document.getElementById(id); if (!el) return;
     el.innerHTML = '';
-    for (let i = 0; i < total; i++) {
-      const p = document.createElement('div');
-      p.className = 'pip';
-      if (i < scores[0]) p.classList.add('win');
-      el.appendChild(p);
+    for (const k of Object.keys(map)) {
+      const o = document.createElement('option'); o.value = k; o.textContent = label(k);
+      el.appendChild(o);
     }
   }
 
-  banner(text, type = 'round') {
-    const el = $('#round-banner');
-    el.textContent = text;
-    el.className = 'round-banner';
-    void el.offsetWidth;
-    el.classList.add('show');
-    el.classList.remove('hidden');
-    if (type === 'fight') el.style.color = '#ffd24a';
-    else if (type === 'count') el.style.color = '#00e5ff';
-    else el.style.color = '#fff';
+  // ---- room lobby ----
+  showRoomCode(code, peers = []) {
+    this.show('online-lobby');
+    document.getElementById('room-code-display').textContent = code;
+    this.updatePeers(peers);
+    const link = `${location.origin}${location.pathname}?room=${code}`;
+    document.getElementById('room-link').textContent = link;
+  }
+  updatePeers(peers) {
+    const list = document.getElementById('peer-list'); if (!list) return;
+    list.innerHTML = '';
+    peers.forEach(p => {
+      const li = document.createElement('li'); li.textContent = '⚔ ' + (p.name || p.id);
+      list.appendChild(li);
+    });
+  }
+  setHostControls(isHost) {
+    const b = document.getElementById('online-start-match');
+    if (b) b.style.display = isHost ? 'inline-block' : 'none';
+    const w = document.getElementById('waiting-host');
+    if (w) w.style.display = isHost ? 'none' : 'block';
   }
 
-  damageFlash() {
-    this.flash.classList.remove('active');
-    void this.flash.offsetWidth;
-    this.flash.classList.add('active');
+  // ---- HUD ----
+  setupHUD(names, scores) {
+    document.getElementById('hud-name1').textContent = names[0];
+    document.getElementById('hud-name2').textContent = names[1];
+    this.updateScore(scores);
+    document.getElementById('hud').style.display = 'flex';
   }
-
-  showResult(won, winnerName) {
-    this.show('result');
-    const t = $('#result-title');
-    t.textContent = won ? 'VICTORY' : 'DEFEAT';
-    t.className = won ? 'win' : 'lose';
-    $('#result-sub').textContent = won ? 'あなたの勝利！' : `${winnerName} の勝利`;
+  updateScore(scores) {
+    document.getElementById('hud-score1').textContent = scores[0];
+    document.getElementById('hud-score2').textContent = scores[1];
   }
-
-  // online helpers
-  showRoomCode(code) {
-    $('#room-info').classList.remove('hidden');
-    $('#room-code').textContent = code;
+  updateBars(fighters) {
+    // health = inverse of locked joints / severed
+    fighters.forEach((f, i) => {
+      const locked = f.jointLockCount();
+      const sev = Object.keys(f.severed).length;
+      const hp = Math.max(0, 100 - locked * 22 - sev * 30);
+      const bar = document.getElementById('hud-hp' + (i + 1));
+      if (bar) bar.style.width = (f.alive ? hp : 0) + '%';
+    });
   }
-  setWaiting(msg) { $('#waiting-msg').textContent = msg; }
-  setConnStatus(msg) { $('#conn-status').textContent = msg; }
+  announce(text) {
+    const el = document.getElementById('announce');
+    if (!el) return;
+    el.textContent = text; el.classList.remove('show');
+    void el.offsetWidth; el.classList.add('show');
+  }
+  showResult(text, win) {
+    const ov = document.getElementById('result-overlay');
+    document.getElementById('result-text').textContent = text;
+    document.getElementById('result-text').className = win ? 'win' : 'lose';
+    ov.classList.add('show');
+  }
+  toast(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
 }

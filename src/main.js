@@ -1,158 +1,150 @@
 // ============================================================
-// Entry point — boots Rapier, wires UI ⇄ Game ⇄ Net.
+// Entry — boots Three.js game (no WASM = instant load),
+// wires UI ⇄ Game ⇄ Net. Virtual joysticks + AI + online.
 // ============================================================
-import RAPIER from '@dimforge/rapier3d-compat';
 import { Game } from './game.js';
 import { UIManager } from './ui.js';
+import { InputManager } from './input.js';
 import { NetClient } from './net.js';
 import { audio } from './audio.js';
+import { AI_PROFILES } from './config.js';
 
 const canvas = document.getElementById('game-canvas');
 const ui = new UIManager();
+const input = new InputManager();
+ui.input = input;
 
 let game = null;
 let net = null;
 
-async function boot() {
-  ui.setLoading(15, '物理エンジンを初期化中...');
-  await RAPIER.init();
-  ui.setLoading(60, 'アリーナを構築中...');
-  game = new Game(RAPIER, canvas, ui);
-  game.ui.input.initDesktop(canvas);
+function boot() {
+  ui.setLoading(30, 'シーンを構築中...');
+  game = new Game(canvas, ui, input);
+  ui.setLoading(70, 'コントロールを準備中...');
+  // touch joysticks
+  input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
+  input.initDesktop(canvas);
   ui.setLoading(100, '準備完了！');
-  await new Promise(r => setTimeout(r, 350));
-  ui.show('menu');
-
-  // auto-join via ?room=CODE
-  const params = new URLSearchParams(location.search);
-  const roomParam = params.get('room');
-  if (roomParam) {
-    ui.show('online-setup');
-    document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
-    document.getElementById('join-code').value = roomParam.toUpperCase();
-  }
+  setTimeout(() => {
+    ui.show('menu');
+    // auto-join via ?room=CODE
+    const room = new URLSearchParams(location.search).get('room');
+    if (room) {
+      ui.show('online-setup');
+      document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+      document.getElementById('join-code').value = room.toUpperCase();
+    }
+  }, 250);
 }
 
-// ---- audio unlock on first interaction ----
-ui.on('userInteract', () => { audio.init(); audio.resume(); });
-window.addEventListener('pointerdown', () => { audio.init(); audio.resume(); }, { once: true });
+// audio unlock
+const unlock = () => { audio.init(); audio.resume(); };
+ui.on('userInteract', unlock);
+window.addEventListener('pointerdown', unlock, { once: true });
 
-// ---- AI / practice ----
+// ---- AI mode ----
 ui.on('startAI', ({ difficulty, weapon, stage }) => {
   audio.init();
-  ui.hide('ai-setup');
+  game.aiDifficulty = difficulty;
   game.net = null;
   game.startMatch({
     mode: 'ai', difficulty, weapons: [weapon, weapon], stage,
-    names: ['YOU', 'CPU (' + diffLabel(difficulty) + ')'], localIndex: 0,
+    names: ['YOU', 'CPU (' + (AI_PROFILES[difficulty]?.label || 'NORMAL') + ')'], localIndex: 0,
   });
+  ui.announce('FIGHT!');
 });
 
-ui.on('startPractice', () => {
+// ---- local 2P (shared keyboard - both on one device for fun) ----
+ui.on('startLocal', ({ weapons, stage }) => {
   audio.init();
   game.net = null;
   game.startMatch({
-    mode: 'ai', difficulty: 'easy', weapons: ['katana', 'katana'], stage: 'arena',
-    names: ['YOU', 'TRAINING'], localIndex: 0,
+    mode: 'local', weapons, stage,
+    names: ['PLAYER 1', 'PLAYER 2'], localIndex: 0,
   });
+  ui.announce('FIGHT!');
 });
 
-// ---- pause / result ----
-ui.on('togglePause', () => { game.pause(!game.paused); });
-ui.on('rematch', () => game.rematch());
-ui.on('toMenu', () => { game.stop(); net?.close(); net = null; ui.show('menu'); });
-
-// ============================================================
-// ONLINE MODE
-// ============================================================
-ui.on('createRoom', async ({ name, weapon }) => {
-  audio.init();
-  ui.setWaiting('サーバーに接続中...');
+// ---- online ----
+function ensureNet() {
+  if (net && net.connected) return Promise.resolve(net);
   net = new NetClient();
-  wireNet(net);
-  try {
-    await net.connect();
-    net.createRoom(name, weapon);
-    ui._pendingName = name; ui._pendingWeapon = weapon;
-  } catch (e) {
-    ui.setWaiting('⚠ 接続できません。サーバー未起動の可能性があります。');
-  }
-});
-
-ui.on('joinRoom', async ({ name, code, weapon }) => {
-  if (!code) { ui.setConnStatus('⚠ ルームコードを入力してください'); return; }
-  audio.init();
-  ui.setConnStatus('接続中...');
-  net = new NetClient();
-  wireNet(net);
-  try {
-    await net.connect();
-    net.joinRoom(code, name, weapon);
-    ui._pendingName = name; ui._pendingWeapon = weapon;
-  } catch (e) {
-    ui.setConnStatus('⚠ 接続できません。');
-  }
-});
-
-function wireNet(n) {
-  n.on('roomCreated', (code) => { ui.showRoomCode(code); ui.setWaiting('相手の参加を待っています...'); });
-  n.on('peerJoined', (msg) => {
-    // host: both ready → start as authority
-    ui.setWaiting('相手が参加しました！開始します...');
-    startOnlineMatch(0, [ui._pendingWeapon || 'katana', msg.weapon || 'katana'], [ui._pendingName || 'YOU', msg.name || 'P2']);
-  });
-  n.on('joinedRoom', (msg) => {
-    // guest: start as client (local index 1)
-    ui.setConnStatus('✓ 参加成功！開始します...');
-    startOnlineMatch(1, [msg.hostWeapon || 'katana', ui._pendingWeapon || 'katana'], [msg.hostName || 'P1', ui._pendingName || 'YOU']);
-  });
-  n.on('netError', (m) => { ui.setConnStatus('⚠ ' + m); ui.setWaiting('⚠ ' + m); });
-  n.on('peerLeft', () => { ui.banner('相手が退出しました', 'count'); setTimeout(() => { game.stop(); ui.show('menu'); }, 1800); });
-  n.on('disconnect', () => {});
-
-  // gameplay sync
-  n.on('remoteInput', (data) => {
-    // host applies guest input to fighter[1]
-    if (n.isHost && game.fighters[1]) {
-      const d = game.fighters[1].doll;
-      d.moveDir = data.moveX; if (data.jump) d.wantJump = true;
-      d.blocking = data.block; if (data.aim !== undefined) d.setAim(data.aim);
-    }
-  });
-  n.on('remoteSwing', (dir) => {
-    const idx = n.isHost ? 1 : 0;
-    const d = game.fighters[idx]?.doll;
-    if (d) { d.startSwing(dir.x, dir.y); audio.swing(); }
-  });
-  n.on('snapshot', (data) => {
-    // guest applies authoritative snapshot
-    if (!n.isHost && game.fighters.length === 2) {
-      game.fighters[0].doll.applySnapshot(data.a, 0.5);
-      game.fighters[1].doll.applySnapshot(data.b, 0.5);
-    }
-  });
-  n.on('roundEnd', (winner, scores) => {
-    if (!n.isHost) { game.scores = scores; game.ui.updateRoundPips(scores, 2); }
-  });
+  setupNetHandlers();
+  return net.connect().then(() => net);
 }
 
-function startOnlineMatch(localIndex, weapons, names) {
-  ui.hide('online-setup');
+function setupNetHandlers() {
+  net.on('created', (m) => {
+    game.pendingOpts = net._opts;
+    ui.showRoomCode(m.room, [{ id: m.id, name: net._opts.name }]);
+    ui.setHostControls(true);
+  });
+  net.on('joined', (m) => {
+    ui.showRoomCode(m.room, m.peers);
+    ui.setHostControls(false);
+    game.pendingOpts = m.opts;
+  });
+  net.on('peer-join', (m) => {
+    ui.toast((m.name || 'プレイヤー') + ' が参加しました');
+    // refresh peer list (host tracks simply)
+    const list = document.getElementById('peer-list');
+    const li = document.createElement('li'); li.textContent = '⚔ ' + (m.name || m.id);
+    list?.appendChild(li);
+  });
+  net.on('peer-leave', () => ui.toast('プレイヤーが退出しました'));
+  net.on('start', (m) => startOnlineMatch(m.opts));
+  net.on('state', (m) => game.applyRemoteState(m.s));
+  net.on('neterror', (m) => ui.toast(m.msg || 'ネットワークエラー'));
+  net.on('close', () => ui.toast('接続が切れました'));
+}
+
+ui.on('hostRoom', (opts) => {
+  ensureNet().then(() => {
+    net._opts = opts;
+    net.createRoom(opts.name, opts);
+  }).catch(() => ui.toast('サーバーに接続できません（ローカルではnpm start が必要）'));
+});
+
+ui.on('joinRoom', ({ code, name }) => {
+  if (!code) { ui.toast('ルームコードを入力してください'); return; }
+  ensureNet().then(() => {
+    net._opts = { name };
+    net.joinRoom(code, name);
+  }).catch(() => ui.toast('サーバーに接続できません'));
+});
+
+ui.on('onlineStart', () => {
+  const opts = game.pendingOpts || {};
+  const matchOpts = {
+    weapons: [opts.weapon || 'katana', opts.weapon || 'katana'],
+    stage: opts.stage || 'arena',
+  };
+  net.startMatch(matchOpts);
+  // host also starts locally as player 0
+  startOnlineMatch(matchOpts, true);
+});
+
+function startOnlineMatch(opts, isHost) {
+  const host = isHost ?? net.isHost;
   game.net = net;
-  // guest fighters are remote-authority; configure
   game.startMatch({
-    mode: 'online', weapons, stage: 'arena', names, localIndex,
+    mode: 'online',
+    weapons: opts.weapons || ['katana', 'katana'],
+    stage: opts.stage || 'arena',
+    names: host ? ['YOU (HOST)', 'OPPONENT'] : ['OPPONENT', 'YOU'],
+    localIndex: host ? 0 : 1,
   });
-  // net stat display
-  document.getElementById('net-stat')?.classList.remove('hidden');
-  setInterval(() => {
-    const el = document.getElementById('net-stat');
-    if (el && net) el.textContent = `ping: ${net.ping} ms ${net.isHost ? '(host)' : '(guest)'}`;
-  }, 1000);
+  ui.announce('FIGHT!');
 }
 
-function diffLabel(d) {
-  return { easy: 'かんたん', normal: 'ふつう', hard: 'むずかしい', insane: '鬼' }[d] || d;
-}
+// ---- pause / quit / rematch ----
+ui.on('quit', () => { if (net) net.leave(); game.quitToMenu(); });
+ui.on('rematch', () => {
+  if (game.mode === 'ai') {
+    ui.emit('startAI', { difficulty: game.aiDifficulty, weapon: game.fighters[0]?.weaponKey || 'katana', stage: game.arena.stageKey });
+  } else {
+    game.quitToMenu();
+  }
+});
 
 boot();

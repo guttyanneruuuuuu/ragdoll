@@ -1,5 +1,5 @@
 // ============================================================
-// Visual effects — sparks, blood, hitstop, camera shake
+// Juice: spark particles, slash trails, camera shake, hitstop.
 // ============================================================
 import * as THREE from 'three';
 
@@ -7,80 +7,77 @@ export class Effects {
   constructor(scene, camera) {
     this.scene = scene;
     this.camera = camera;
-    this.particles = [];
+    this.sparks = [];
     this.shakeAmt = 0;
-    this.shakeDecay = 0;
+    this.shakeT = 0;
     this.hitstop = 0;
-    this._baseCamPos = new THREE.Vector3();
-    this._pool = [];
+    this.baseCamPos = new THREE.Vector3();
+
+    // spark pool
+    this.sparkGeo = new THREE.BufferGeometry();
+    const N = 400;
+    this.maxSparks = N;
+    const pos = new Float32Array(N * 3);
+    this.sparkGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.sparkMat = new THREE.PointsMaterial({ color: 0xffd24a, size: 0.22, transparent: true,
+      opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.sparkPoints = new THREE.Points(this.sparkGeo, this.sparkMat);
+    this.scene.add(this.sparkPoints);
+    this.live = []; // {x,y,z,vx,vy,vz,life}
   }
 
-  _spawn(pos, color, count, speed, life, size) {
-    const geo = new THREE.SphereGeometry(size, 6, 6);
+  burst(x, y, z, count = 20, color = 0xffd24a) {
+    this.sparkMat.color.setHex(color);
     for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
-      const m = new THREE.Mesh(geo, mat);
-      m.position.copy(pos);
-      this.scene.add(m);
       const a = Math.random() * Math.PI * 2;
-      const b = (Math.random() - 0.5) * Math.PI;
-      const sp = speed * (0.5 + Math.random());
-      this.particles.push({
-        mesh: m,
-        vel: new THREE.Vector3(Math.cos(a) * Math.cos(b), Math.abs(Math.sin(b)) + 0.3, Math.sin(a) * Math.cos(b)).multiplyScalar(sp),
-        life, maxLife: life, gravity: -9,
+      const e = Math.random() * Math.PI;
+      const sp = 6 + Math.random() * 12;
+      this.live.push({
+        x, y, z,
+        vx: Math.sin(e) * Math.cos(a) * sp,
+        vy: Math.cos(e) * sp + 4,
+        vz: Math.sin(e) * Math.sin(a) * sp,
+        life: 0.4 + Math.random() * 0.4,
       });
     }
+    if (this.live.length > this.maxSparks) this.live.splice(0, this.live.length - this.maxSparks);
   }
 
-  sparks(pos) {
-    this._spawn(pos, 0xffdd66, 14, 6, 0.4, 0.04);
-    this._spawn(pos, 0xffffff, 6, 8, 0.3, 0.03);
-  }
-
-  blood(pos) {
-    this._spawn(pos, 0xcc1133, 22, 5, 0.7, 0.06);
-    this._spawn(pos, 0x880022, 10, 3, 0.9, 0.08);
-  }
-
-  shake(amt = 0.4, decay = 3) {
+  shake(amt = 0.4, time = 0.25) {
     this.shakeAmt = Math.max(this.shakeAmt, amt);
-    this.shakeDecay = decay;
+    this.shakeT = Math.max(this.shakeT, time);
   }
-
-  triggerHitstop(dur = 0.08) { this.hitstop = Math.max(this.hitstop, dur); }
+  stop(t = 0.05) { this.hitstop = Math.max(this.hitstop, t); }
 
   update(dt) {
-    // hitstop consumes time
-    if (this.hitstop > 0) { this.hitstop -= dt; }
-
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.life -= dt;
-      if (p.life <= 0) {
-        this.scene.remove(p.mesh); p.mesh.material.dispose();
-        this.particles.splice(i, 1); continue;
+    // particles
+    const pos = this.sparkGeo.attributes.position.array;
+    let n = 0;
+    for (let i = this.live.length - 1; i >= 0; i--) {
+      const s = this.live[i];
+      s.life -= dt;
+      if (s.life <= 0) { this.live.splice(i, 1); continue; }
+      s.vy -= 28 * dt;
+      s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+      if (n < this.maxSparks) {
+        pos[n * 3] = s.x; pos[n * 3 + 1] = s.y; pos[n * 3 + 2] = s.z; n++;
       }
-      p.vel.y += p.gravity * dt;
-      p.mesh.position.addScaledVector(p.vel, dt);
-      p.mesh.material.opacity = p.life / p.maxLife;
-      const s = 0.5 + 0.5 * (p.life / p.maxLife);
-      p.mesh.scale.setScalar(s);
     }
-  }
+    this.sparkGeo.setDrawRange(0, n);
+    this.sparkGeo.attributes.position.needsUpdate = true;
+    this.sparkMat.opacity = 0.95;
 
-  applyCameraShake(dt, basePos) {
-    if (this.shakeAmt > 0.001) {
-      const s = this.shakeAmt;
-      this.camera.position.x = basePos.x + (Math.random() - 0.5) * s;
-      this.camera.position.y = basePos.y + (Math.random() - 0.5) * s;
-      this.camera.position.z = basePos.z + (Math.random() - 0.5) * s * 0.5;
-      this.shakeAmt -= this.shakeDecay * dt;
-      if (this.shakeAmt < 0) this.shakeAmt = 0;
+    // camera shake
+    if (this.shakeT > 0) {
+      this.shakeT -= dt;
+      const a = this.shakeAmt * (this.shakeT > 0 ? 1 : 0);
+      this.shakeOffset = new THREE.Vector3(
+        (Math.random() - 0.5) * a,
+        (Math.random() - 0.5) * a,
+        (Math.random() - 0.5) * a
+      );
     } else {
-      this.camera.position.copy(basePos);
+      this.shakeOffset = new THREE.Vector3();
     }
   }
-
-  isHitstopped() { return this.hitstop > 0; }
 }
