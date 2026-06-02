@@ -87,6 +87,33 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /** Brief full-screen flash + radial vignette on a clean kill / round end. */
+  drawKOFlash(strength, color = '#fff') {
+    if (strength <= 0) return;
+    const ctx = this.ctx, W = this.W, H = this.H;
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.6, strength * 0.6);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  /** Highlight the round winner with a pulsing glow ring. */
+  drawWinnerGlow(r, t) {
+    const ctx = this.ctx;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 0.15);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + pulse * 0.35;
+    const grad = ctx.createRadialGradient(r.cx, r.cy - 30, 10, r.cx, r.cy - 30, 90);
+    grad.addColorStop(0, r.color);
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(r.cx, r.cy - 30, 90, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // ---- Ragdoll -------------------------------------------------------------
   drawRagdoll(r) {
     const ctx = this.ctx;

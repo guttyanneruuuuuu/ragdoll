@@ -172,8 +172,17 @@ export class Game {
     const r = this.renderer;
     r.clear(this.combat.shake);
     r.drawArena(this.world, this.t);
+    // winner glow during the round-end celebration window
+    if (this.roundOver && this.winner >= 0) {
+      r.drawWinnerGlow(this.fighters[this.winner], this.t);
+    }
     for (const f of this.fighters) r.drawRagdoll(f);
     r.drawParticles(this.combat);
+    // KO flash: strongest right at the kill, fading over the round-end window
+    if (this.roundOver && this.winner >= 0) {
+      const k = Math.max(0, this.roundOverTimer - 100) / 20; // fades in first ~20 frames
+      r.drawKOFlash(k, '#ffffff');
+    }
     r.restore();
   }
 
