@@ -165,7 +165,7 @@ export class Fighter {
   swordTip(out = {}) {
     const hand = this.nodes.handR.p;
     const dir = this.swordWorldDir;
-    const reach = this.weapon.reach + 0.3;
+    const reach = this.weapon.reach + 0.5;
     out.x = hand.x + dir.x * reach;
     out.y = hand.y + dir.y * reach;
     out.z = hand.z + dir.z * reach;
@@ -232,7 +232,7 @@ export class Fighter {
 
     // movement: nudge feet & hip toward move direction when alive
     if (this.alive && this.stagger <= 0) {
-      const speed = 6.0;
+      const speed = 7.5;
       const mvx = this.moveDir.x * speed, mvz = this.moveDir.z * speed;
       for (const f of ['footL', 'footR', 'hip']) {
         const p = this.nodes[f];

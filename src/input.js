@@ -20,11 +20,11 @@ export class InputManager {
     this.destroy();
     const left = nipplejs.create({
       zone: leftEl, mode: 'static', position: { left: '50%', top: '50%' },
-      color: '#00e5ff', size: 110,
+      color: '#00e5ff', size: 130,
     });
     left.on('move', (e, d) => {
       const a = d.angle.radian;
-      const f = Math.min(d.force, 1.2);
+      const f = Math.min(d.force, 1.4);
       this.move.x = Math.cos(a) * f;
       this.move.z = -Math.sin(a) * f;
     });
@@ -32,11 +32,11 @@ export class InputManager {
 
     const right = nipplejs.create({
       zone: rightEl, mode: 'static', position: { left: '50%', top: '50%' },
-      color: '#ffd24a', size: 120,
+      color: '#ffd24a', size: 140,
     });
     right.on('move', (e, d) => {
       const a = d.angle.radian;
-      const f = Math.min(d.force, 1.5);
+      const f = Math.min(d.force, 1.8);
       this._rightVec = { x: Math.cos(a) * f, y: Math.sin(a) * f };
     });
     right.on('end', () => {

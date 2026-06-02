@@ -52,7 +52,7 @@ export const BODY = {
 
 export const DAMAGE = {
   // impact speed above this counts as a hit
-  hitThreshold: 9.0,
+  hitThreshold: 7.5,
   // energy needed to lock a joint
   lockEnergy: 22,
   // energy needed to sever (visually detach + heavy stagger)

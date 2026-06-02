@@ -27,7 +27,7 @@ export class Arena {
   build() {
     const s = this.stage;
     this.scene.background = new THREE.Color(s.sky);
-    this.scene.fog = new THREE.Fog(s.fog, 22, 60);
+    this.scene.fog = new THREE.Fog(s.fog, 18, 80);
 
     // ground disc
     const radius = s.ringOut ? WORLD.arenaRadius : 40;
@@ -42,9 +42,9 @@ export class Arena {
     this.props.add(ground);
 
     // glowing ring edge
-    const ringGeo = new THREE.TorusGeometry(radius, 0.18, 12, 64);
+    const ringGeo = new THREE.TorusGeometry(radius, 0.22, 16, 80);
     const ringMat = new THREE.MeshStandardMaterial({ color: s.accent, emissive: s.accent,
-      emissiveIntensity: 1.2, roughness: 0.4 });
+      emissiveIntensity: 1.5, roughness: 0.3 });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.02;
@@ -100,14 +100,22 @@ export class Arena {
       this.props.add(m);
     }
     // distant mountains
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
       const mt = new THREE.Mesh(
-        new THREE.ConeGeometry(8 + Math.random() * 4, 14 + Math.random() * 6, 5),
-        new THREE.MeshStandardMaterial({ color: 0x6a8f4f, flatShading: true, roughness: 1 })
+        new THREE.ConeGeometry(10 + Math.random() * 6, 18 + Math.random() * 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0x5a7f3f, flatShading: true, roughness: 1 })
       );
-      mt.position.set(Math.cos(a) * 48, 4, Math.sin(a) * 48);
+      mt.position.set(Math.cos(a) * 55, 6, Math.sin(a) * 55);
       this.props.add(mt);
+    }
+    // sky clouds
+    const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true });
+    cloudMat.opacity = 0.4;
+    for (let i = 0; i < 6; i++) {
+      const cloud = new THREE.Mesh(new THREE.SphereGeometry(3 + Math.random() * 2, 8, 8), cloudMat);
+      cloud.position.set((Math.random() - 0.5) * 80, 30 + Math.random() * 10, (Math.random() - 0.5) * 80);
+      this.props.add(cloud);
     }
   }
 

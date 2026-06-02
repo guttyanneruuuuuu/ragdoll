@@ -126,7 +126,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
 
 /* ---- touch controls ---- */
 #touch-controls { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none; }
-.joy-zone { position: absolute; bottom: 0; width: 45%; height: 42%; pointer-events: auto; }
+.joy-zone { position: absolute; bottom: 0; width: 50%; height: 50%; pointer-events: auto; }
 .joy-zone.left { left: 0; }
 .joy-zone.right { right: 0; }
 .joy-hint { position: absolute; bottom: 14px; font-size: 12px; opacity: 0.4; font-weight: 700;

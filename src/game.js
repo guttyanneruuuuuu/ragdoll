@@ -25,9 +25,9 @@ export class Game {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
-    this.camera.position.set(0, 9, 16);
-    this.camera.lookAt(0, 2, 0);
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+    this.camera.position.set(0, 10, 18);
+    this.camera.lookAt(0, 2.5, 0);
 
     this.setupLights();
     this.effects = new Effects(this.scene, this.camera);
@@ -48,18 +48,22 @@ export class Game {
   }
 
   setupLights() {
-    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    const amb = new THREE.AmbientLight(0xffffff, 0.65);
     this.scene.add(amb);
-    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-    dir.position.set(8, 18, 10);
+    const dir = new THREE.DirectionalLight(0xffffff, 1.3);
+    dir.position.set(10, 20, 12);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
-    dir.shadow.camera.left = -20; dir.shadow.camera.right = 20;
-    dir.shadow.camera.top = 20; dir.shadow.camera.bottom = -20;
+    dir.shadow.mapSize.set(2048, 2048);
+    dir.shadow.camera.left = -25; dir.shadow.camera.right = 25;
+    dir.shadow.camera.top = 25; dir.shadow.camera.bottom = -25;
+    dir.shadow.bias = -0.0005;
     this.scene.add(dir);
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.4);
-    fill.position.set(-10, 8, -8);
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.6);
+    fill.position.set(-12, 10, -10);
     this.scene.add(fill);
+    const back = new THREE.DirectionalLight(0xff8844, 0.3);
+    back.position.set(0, 5, -20);
+    this.scene.add(back);
     this.dirLight = dir;
   }
 
@@ -174,11 +178,11 @@ export class Game {
     for (const [name, node] of Object.entries(victim.nodes)) {
       if (victim.severed[name]) continue;
       const d = pointSegDist(node.p, hand, tip);
-      if (d < node.radius + 0.25) {
+      if (d < node.radius + 0.4) {
         // compute hand velocity as impact energy
         const v = attacker.nodes.handR.vel();
         const speed = Math.hypot(v.x, v.y, v.z) * 60; // per-second-ish
-        if (speed < DAMAGE.hitThreshold) continue;
+        if (speed < DAMAGE.hitThreshold * 0.85) continue;
         if (victim.blocking && this.blockChance(attacker, victim)) {
           audio.clang();
           this.effects.burst(tip.x, tip.y, tip.z, 18, 0x88ddff);
@@ -235,12 +239,12 @@ export class Game {
     const a = this.fighters[0].nodes.hip.p, b = this.fighters[1].nodes.hip.p;
     const cx = (a.x + b.x) / 2, cz = (a.z + b.z) / 2;
     const spread = Math.hypot(a.x - b.x, a.z - b.z);
-    const dist = THREE.MathUtils.clamp(13 + spread * 0.6, 13, 24);
-    const target = new THREE.Vector3(cx, 8, cz + dist);
-    this.camera.position.lerp(target, 1 - Math.pow(0.001, dt));
-    const look = new THREE.Vector3(cx, 2.5, cz);
+    const dist = THREE.MathUtils.clamp(15 + spread * 0.7, 15, 28);
+    const target = new THREE.Vector3(cx, 11, cz + dist);
+    this.camera.position.lerp(target, 1 - Math.pow(0.0008, dt));
+    const look = new THREE.Vector3(cx, 3, cz);
     this._look = this._look || look.clone();
-    this._look.lerp(look, 1 - Math.pow(0.001, dt));
+    this._look.lerp(look, 1 - Math.pow(0.0008, dt));
     const off = this.effects.shakeOffset || new THREE.Vector3();
     this.camera.position.add(off);
     this.camera.lookAt(this._look);
