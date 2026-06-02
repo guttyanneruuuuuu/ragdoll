@@ -1,67 +1,98 @@
-# ⚔️ Ragdoll Blade Arena
+# ⚔️ RAGBLADE ARENA
 
-A browser‑based, physics‑driven sword‑fighting game inspired by the *Ragdoll Blade* concept — rebuilt from scratch with **100% original code** and **procedurally‑drawn visuals** (no external image/audio assets). Control a floppy ragdoll, swing your blade, and slice your opponent's limbs (and head!) clean off.
+**3D ブラウザ版 Ragdoll Blade** — ラグドール物理 × 剣戟アクション × オンライン友達対戦 × AI対戦
 
-🎮 **Two ways to fight:**
-- 🤖 **AI対戦 (1P)** — battle a CPU opponent with selectable difficulty (Easy / Normal / Hard)
-- 👥 **友達対戦 (2P)** — local same‑keyboard friend vs. friend duels
-
-## ✨ Features
-
-- **Verlet‑integration physics engine** — point masses + distance/angle constraints give the signature wobbly, comedic ragdoll motion.
-- **Active ragdoll control** — "muscles" keep your fighter upright; walk, jump and swing using physics forces, not canned animations.
-- **Limb severing** — when a swinging blade crosses a bone, that bone is cut: the limb becomes a free‑floating body, blood sprays, and red cut‑caps appear. Lose your head or spine and you're out.
-- **Blade clash sparks** — parry an incoming sword and watch the sparks fly.
-- **3 themed arenas** — Verdant Field 🌿, Stone Canyon 🪨, Frozen Lake ❄️ (all drawn procedurally).
-- **Best‑of rounds** — first to win the majority of 1 / 3 / 5 rounds takes the match.
-- **Procedural audio** — swings, clashes, slices and victory jingles synthesized live via the Web Audio API.
-- **Touch controls** — on‑screen buttons for mobile (1P mode).
-- **Screen shake & hit‑pause** — juicy feedback on every clean cut.
-
-## 🎯 Controls
-
-| Action | Player 1 | Player 2 |
-|--------|----------|----------|
-| Move   | `A` / `D` | `←` / `→` |
-| Jump   | `W` | `↑` |
-| Swing blade | `F` / `Space` | `Enter` / `.` |
-| Pause  | `Esc` | `Esc` |
-
-On a touch device the 1P mode shows on‑screen movement / jump / attack buttons.
-
-## 🚀 Run locally
-
-```bash
-# from the project root
-python3 -m http.server 8000
-# then open http://localhost:8000
-```
-
-It's a pure static site — any static file server works. No build step, no dependencies.
-
-## 📁 Project structure
-
-```
-index.html        # markup: canvas, menus, HUD, touch controls
-styles/main.css   # all UI styling
-src/
-  physics.js      # Verlet world: points, sticks, angle constraints, collisions
-  ragdoll.js      # active ragdoll fighter (skeleton, muscles, sword)
-  combat.js       # slicing, severing, blood & spark particle systems
-  render.js       # Canvas2D renderer + procedural arena themes
-  ai.js           # finite‑state combat AI (approach / strike / retreat / dodge)
-  input.js        # keyboard (2P) + touch input mapping
-  audio.js        # procedural Web Audio sound effects
-  game.js         # game manager: world setup, modes, rounds, scoring
-  main.js         # UI controller & app bootstrap
-```
-
-## 🧠 How it works (a peek under the hood)
-
-Each fighter is a small skeleton of **point masses** connected by **distance constraints** ("bones") that are solved with several relaxation iterations per frame. Soft per‑frame "muscle" forces in `ragdoll.control()` spring the hip up to standing height and stack the chest/head above the hip, so the doll *tries* to stand — but physics (and your opponent's sword) constantly fight back, producing the chaotic, funny motion.
-
-Combat is resolved by testing each active blade segment (handle→tip) against every bone of the other fighters using **segment‑intersection** math. A hit marks the bone `broken`, frees the limb, spawns blood, and applies an impulse along the cut direction. Losing the neck or spine ends the round.
+[`Ragdoll Blade`](https://play.google.com/store/apps/details?id=games.tatsumaki.ragdollblade) の「物理演算で動くキャラを剣でなぎ倒す爽快感」を、**フル3D・ブラウザ完結**で再構築したオリジナル作品です。仮想スティックで移動と剣を操作し、敵の関節を斬って機能停止させる「関節ロック」システムを搭載。**AIと戦う**ことも、**URL共有で友達とオンライン対戦**することもできます。
 
 ---
 
-*Built as an original homage to the physics‑combat genre. All art and sound are generated at runtime in code.*
+## 🎮 ゲームモード
+
+| モード | 説明 |
+|--------|------|
+| 🤖 **AI対戦** | CPU と戦う。難易度4段階（かんたん / ふつう / むずかしい / 鬼） |
+| 🌐 **友達対戦** | ルームコード or 招待リンクでオンライン1対1 |
+| 🎯 **練習モード** | 操作を覚えるためのトレーニング |
+
+## ✨ 主な特徴
+
+- **真の3Dラグドール物理** — [Rapier](https://rapier.rs/)（Rust製WASM物理エンジン）で全身の剛体＋関節をシミュレーション。毎回違う結末。
+- **アクティブラグドール制御** — 「筋肉」で姿勢を保ちつつ、物理の力で歩く・跳ぶ・斬る。
+- **関節ロック & 部位切断** — 被弾が蓄積すると関節が硬直、さらに進むと手足が切断され武器を落とす。頭/胴を斬られると致命。
+- **仮想スティック操作** — 左スティックで移動、右スティックで剣を狙って振る（タッチ対応）。PCはWASD＋マウス。
+- **4種類の武器** — 刀・大剣・槍・ハンマー。リーチ・威力・重さが異なる。
+- **3つのステージ** — 闘技場・雪山・工場（ネオン演出）。
+- **Juice演出** — ヒットストップ、火花、流血、カメラシェイク、手続き音響（Web Audio）。
+- **オンライン同期** — WebSocketリレー、ホスト権威モデル＋クライアント補間。
+
+## 🕹️ 操作方法
+
+### モバイル（タッチ）
+- **左スティック**: 移動 / 上に倒してジャンプ
+- **右スティック**: 剣の狙い → 離して振る
+- **⤴ ボタン**: ジャンプ
+- **🛡 ボタン**: ガード
+
+### PC
+| 操作 | キー |
+|------|------|
+| 移動 | `A` / `D` または `←` `→` |
+| ジャンプ | `W` / `Space` |
+| 剣を振る | 左クリック（マウス方向）/ `F` |
+| ガード | 右クリック / `Shift` |
+| 剣の狙い | マウス移動 |
+
+## 🛠️ 技術スタック
+
+- **レンダリング**: [Three.js](https://threejs.org/)
+- **物理**: [Rapier3D](https://rapier.rs/) (`@dimforge/rapier3d-compat`, WASM)
+- **仮想スティック**: [nipplejs](https://github.com/yoannmoinet/nipplejs)
+- **ネットワーク**: WebSocket リレーサーバー (`ws`)
+- **ビルド**: [Vite](https://vitejs.dev/)
+- **アセット**: 画像・音声は一切外部依存なし（全て手続き生成）
+
+## 🚀 開発・実行
+
+```bash
+npm install
+
+# フロントエンド開発サーバー (http://localhost:3000)
+npm run dev
+
+# オンライン対戦用リレーサーバー (ws://localhost:8787)
+npm run server
+
+# 本番ビルド
+npm run build
+npm run preview
+```
+
+オンライン対戦をローカルで試すには、`npm run dev` と `npm run server` を**両方**起動してください。
+
+## 📁 構成
+
+```
+ragdoll/
+├── index.html          # 画面・HUD・メニュー
+├── server/index.js     # WebSocketリレーサーバー
+└── src/
+    ├── main.js         # エントリ（UI⇄Game⇄Net 配線）
+    ├── game.js         # ゲームループ・試合進行
+    ├── ragdoll.js      # ラグドール剛体＋関節＋剣＋ダメージ
+    ├── arena.js        # ステージ・ライティング
+    ├── combat.js       # 剣の当たり判定・パリィ・ダメージ
+    ├── ai.js           # AI対戦の思考ルーチン
+    ├── net.js          # オンライン同期クライアント
+    ├── input.js        # 仮想スティック＋キーボード/マウス
+    ├── effects.js      # 火花・流血・ヒットストップ・カメラシェイク
+    ├── audio.js        # 手続き音響（Web Audio）
+    ├── ui.js           # DOM UI 管理
+    ├── config.js       # 調整用定数
+    └── styles/main.css # ネオン調UI
+```
+
+## 📜 ライセンス
+
+MIT © guttyanneruuuuuu
+
+> 本作は *Ragdoll Blade* (Tatsumaki Games) の**ゲーム性に着想を得たオリジナル実装**であり、元ゲームのコード・アセットは一切使用していません。

@@ -1,162 +1,141 @@
 // ============================================================
-//  combat.js — Slicing, severing & blood particle systems
-//  Original logic. When an active blade segment crosses a
-//  ragdoll's bone, the bone is severed and the limb becomes a
-//  free-floating body, spraying blood particles.
+// Combat resolution — swept blade vs body parts, clashes, damage.
+// Uses simple segment-vs-AABB tests on the blade each tick.
 // ============================================================
-
-import { segIntersect } from './physics.js';
-
-export class Particle {
-  constructor(x, y, vx, vy, opts = {}) {
-    this.x = x; this.y = y;
-    this.vx = vx; this.vy = vy;
-    this.life = opts.life ?? 40;
-    this.maxLife = this.life;
-    this.size = opts.size ?? 3;
-    this.color = opts.color ?? '#c0202a';
-    this.gravity = opts.gravity ?? 0.45;
-    this.kind = opts.kind ?? 'blood';
-  }
-  step() {
-    this.vx *= 0.98;
-    this.vy += this.gravity;
-    this.x += this.vx;
-    this.y += this.vy;
-    this.life--;
-  }
-}
+import * as THREE from 'three';
+import { DAMAGE, PART } from './config.js';
 
 export class CombatSystem {
-  constructor(world) {
-    this.world = world;
-    this.particles = [];
-    this.sparks = [];
-    this.shake = 0;
-    this.slowmo = 0;
-    this.onHit = null;     // callback(attacker, victim, severedTag)
-    this.lastBlade = new Map(); // ragdoll -> {hx,hy,tx,ty}
+  constructor(effects, audio) {
+    this.effects = effects;
+    this.audio = audio;
+    this._prevTips = new Map(); // doll.id -> Vector3
+    this.onHit = null;          // callback(attacker, defender, part, killed)
+    this.onClash = null;
   }
 
-  spawnBlood(x, y, dir = 0, amount = 14) {
-    for (let i = 0; i < amount; i++) {
-      const a = (dir || 0) + (Math.random() - 0.5) * 2.4;
-      const sp = 2 + Math.random() * 6;
-      this.particles.push(new Particle(
-        x, y,
-        Math.cos(a) * sp,
-        Math.sin(a) * sp - 1,
-        {
-          life: 30 + Math.random() * 40,
-          size: 2 + Math.random() * 4,
-          color: Math.random() < 0.15 ? '#8c1118' : '#cf2531'
+  // segment vs box (part) intersection
+  _segHitsPart(p0, p1, part) {
+    const t = part.body.translation();
+    const r = part.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w).invert();
+    const center = new THREE.Vector3(t.x, t.y, t.z);
+    // transform segment into part local space
+    const a = p0.clone().sub(center).applyQuaternion(q);
+    const b = p1.clone().sub(center).applyQuaternion(q);
+    const half = new THREE.Vector3(part.dims[0] / 2 + 0.04, part.dims[1] / 2 + 0.04, part.dims[2] / 2 + 0.04);
+    return this._segAABB(a, b, half);
+  }
+
+  _segAABB(p0, p1, half) {
+    const d = p1.clone().sub(p0);
+    let tmin = 0, tmax = 1;
+    for (const ax of ['x', 'y', 'z']) {
+      if (Math.abs(d[ax]) < 1e-8) {
+        if (p0[ax] < -half[ax] || p0[ax] > half[ax]) return null;
+      } else {
+        let t1 = (-half[ax] - p0[ax]) / d[ax];
+        let t2 = (half[ax] - p0[ax]) / d[ax];
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+        if (tmin > tmax) return null;
+      }
+    }
+    return p0.clone().addScaledVector(d, tmin);
+  }
+
+  // returns the magnitude of blade swing velocity
+  _bladeSpeed(doll) {
+    const seg = doll.getBladeSegment();
+    if (!seg) return 0;
+    const v = seg.vel;
+    return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  }
+
+  update(attacker, defender) {
+    if (!attacker.weaponObj || attacker.weaponDropped) return;
+    const seg = attacker.getBladeSegment();
+    if (!seg) return;
+
+    // swept segment: from previous tip to current tip + along blade
+    const prevTip = this._prevTips.get(attacker.id) || seg.tip.clone();
+    this._prevTips.set(attacker.id, seg.tip.clone());
+
+    const speed = this._bladeSpeed(attacker);
+    const swinging = attacker.swingPhase > 0 || speed > 4.5;
+    if (!swinging) return;
+
+    // ---- blade-vs-blade clash (parry) ----
+    if (defender.weaponObj && !defender.weaponDropped && defender.blocking) {
+      const dseg = defender.getBladeSegment();
+      if (dseg) {
+        const mid = seg.base.clone().lerp(seg.tip, 0.6);
+        const dmid = dseg.base.clone().lerp(dseg.tip, 0.6);
+        if (mid.distanceTo(dmid) < 0.55) {
+          if (!attacker._didHitThisSwing) {
+            attacker._didHitThisSwing = true;
+            this.audio?.clash();
+            this.effects?.sparks(mid);
+            this.effects?.shake(0.25, 4);
+            this.effects?.triggerHitstop(0.04);
+            // knockback both
+            const dir = mid.clone().sub(dmid).normalize();
+            attacker.parts[PART.LOWER_ARM_R]?.body.applyImpulse({ x: dir.x * 2, y: 1, z: 0 }, true);
+            this.onClash?.(mid);
+          }
+          return; // parried, no damage
         }
-      ));
-    }
-  }
-
-  spawnSpark(x, y) {
-    for (let i = 0; i < 8; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 2 + Math.random() * 4;
-      this.sparks.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, {
-        life: 10 + Math.random() * 10, size: 1.5 + Math.random() * 2,
-        color: Math.random() < 0.5 ? '#fff4c2' : '#ffd24a', gravity: 0.05, kind: 'spark'
-      }));
-    }
-  }
-
-  /**
-   * Test every fighter's active blade against every other fighter's bones.
-   * @param {Ragdoll[]} fighters
-   */
-  update(fighters) {
-    // blade vs bones
-    for (const att of fighters) {
-      const seg = att.bladeSegment ? att.bladeSegment() : null;
-      if (!seg) continue;
-      const prev = this.lastBlade.get(att);
-      const cur = { hx: seg.a.x, hy: seg.a.y, tx: seg.b.x, ty: seg.b.y };
-      this.lastBlade.set(att, cur);
-      if (!att.bladeIsActive()) continue;
-
-      for (const vic of fighters) {
-        if (vic === att || vic.dead) continue;
-        this._sliceFighter(att, vic, seg);
       }
-      // Blade-vs-blade clash (parry sparks)
-      for (const other of fighters) {
-        if (other === att) continue;
-        const oseg = other.bladeSegment ? other.bladeSegment() : null;
-        if (!oseg) continue;
-        const hit = segIntersect(seg.a, seg.b, oseg.a, oseg.b);
-        if (hit && (att.bladeIsActive() || other.bladeIsActive())) {
-          this.spawnSpark(hit.x, hit.y);
-          this.shake = Math.max(this.shake, 4);
-          // push apart
-          const dx = att.handR.x - other.handR.x;
-          att.handR.addForce(Math.sign(dx) * 1.2, -0.5);
-          other.handR.addForce(-Math.sign(dx) * 1.2, -0.5);
+    }
+
+    if (attacker._didHitThisSwing) return;
+
+    // ---- blade vs each defender part ----
+    // test two segments: leading edge sweep + blade body
+    const tests = [
+      [prevTip, seg.tip],
+      [seg.base, seg.tip],
+    ];
+    for (const partName in defender.parts) {
+      if (defender.severed.has(partName)) continue;
+      const part = defender.parts[partName];
+      for (const [a, b] of tests) {
+        const hit = this._segHitsPart(a, b, part);
+        if (hit) {
+          this._resolveHit(attacker, defender, partName, hit, speed);
+          return;
         }
       }
     }
-
-    this._stepParticles();
   }
 
-  _sliceFighter(att, vic, seg) {
-    for (const stick of vic.bodySticks) {
-      if (stick.broken || !stick.breakable) continue;
-      const hit = segIntersect(seg.a, seg.b, stick.a, stick.b);
-      if (!hit) continue;
+  _resolveHit(attacker, defender, partName, point, speed) {
+    attacker._didHitThisSwing = true;
+    const w = attacker.weapon;
+    const energy = DAMAGE.HIT_BASE * w.damage * (0.6 + Math.min(2.2, speed / 6));
 
-      // Sever it!
-      stick.broken = true;
-      const tag = stick.tag;
-      const dir = Math.atan2(seg.b.y - seg.a.y, seg.b.x - seg.a.x) + Math.PI / 2;
-      this.spawnBlood(hit.x, hit.y, dir, 18);
-      this.spawnBlood(hit.x, hit.y, dir + Math.PI, 12);
+    const res = defender.applyDamage(partName, energy, point);
 
-      // Mark cut ends for red-cap rendering
-      stick.a.severed = true; stick.a.damage = 1;
-      stick.b.severed = true; stick.b.damage = 1;
-
-      // Impulse from the blade swing
-      const bvx = (seg.b.x - (this.lastBlade.get(att)?.tx ?? seg.b.x));
-      const force = 6 + Math.abs(bvx) * 0.4;
-      const fa = Math.cos(dir), fb = Math.sin(dir);
-      stick.a.addForce(fa * force, fb * force - 2);
-      stick.b.addForce(fa * force, fb * force - 2);
-
-      vic.health -= 34;
-      this.shake = Math.max(this.shake, 9);
-      this.slowmo = Math.max(this.slowmo, 8);
-      if (this.onHit) this.onHit(att, vic, tag);
-
-      vic.checkDeath();
-      break; // one cut per blade per frame per victim
+    // knockback the hit part
+    const part = defender.parts[partName];
+    if (part) {
+      const dir = new THREE.Vector3(attacker.facing, 0.4, 0).normalize();
+      part.body.applyImpulse({ x: dir.x * energy * 0.04, y: dir.y * energy * 0.03, z: 0 }, true);
     }
+
+    // feedback
+    if (w.blunt) this.audio?.thud(); else this.audio?.slice();
+    this.effects?.blood(point);
+    if (res.severed || res.killed) {
+      this.effects?.shake(0.7, 4);
+      this.effects?.triggerHitstop(res.killed ? 0.18 : 0.1);
+    } else {
+      this.effects?.shake(0.35, 5);
+      this.effects?.triggerHitstop(0.07);
+    }
+
+    this.onHit?.(attacker, defender, partName, res);
   }
 
-  _stepParticles() {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.step();
-      // pool blood on ground
-      if (p.y > this.world.groundY) {
-        p.y = this.world.groundY;
-        p.vx *= 0.6; p.vy = 0; p.gravity = 0;
-        p.life -= 2;
-      }
-      if (p.life <= 0) this.particles.splice(i, 1);
-    }
-    for (let i = this.sparks.length - 1; i >= 0; i--) {
-      const s = this.sparks[i];
-      s.step();
-      if (s.life <= 0) this.sparks.splice(i, 1);
-    }
-    if (this.shake > 0) this.shake *= 0.85;
-    if (this.shake < 0.2) this.shake = 0;
-    if (this.slowmo > 0) this.slowmo--;
-  }
+  reset() { this._prevTips.clear(); }
 }
