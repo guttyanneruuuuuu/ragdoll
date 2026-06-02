@@ -134,21 +134,29 @@ export class InputManager {
     this._desktop = true;
   }
 
-  pollDesktop() {
+  // wasdOnly=true is used in LOCAL-2P mode so arrow keys don't bleed into P1's
+  // movement (arrows are P2's controls there).
+  pollDesktop(wasdOnly = false) {
     if (!this._desktop) return;
     let x = 0, z = 0;
-    if (this.keys['KeyW'] || this.keys['ArrowUp']) z -= 1;
-    if (this.keys['KeyS'] || this.keys['ArrowDown']) z += 1;
-    if (this.keys['KeyA'] || this.keys['ArrowLeft']) x -= 1;
-    if (this.keys['KeyD'] || this.keys['ArrowRight']) x += 1;
+    if (this.keys['KeyW']) z -= 1;
+    if (this.keys['KeyS']) z += 1;
+    if (this.keys['KeyA']) x -= 1;
+    if (this.keys['KeyD']) x += 1;
+    if (!wasdOnly) {
+      if (this.keys['ArrowUp']) z -= 1;
+      if (this.keys['ArrowDown']) z += 1;
+      if (this.keys['ArrowLeft']) x -= 1;
+      if (this.keys['ArrowRight']) x += 1;
+    }
     const m = Math.hypot(x, z);
     if (m > 0) { x /= m; z /= m; }
     // only override touch move when keys pressed
     if (m > 0 || this._lastKeyMove) { this.move.x = x; this.move.z = z; }
     this._lastKeyMove = m > 0;
-    // F or Space = swing forward; Shift = block
+    // F = swing forward; LeftShift = block
     if (this.keys['KeyF']) this.swingQueued = { dx: 1, dy: 0.3 };
-    this.blocking = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
+    this.blocking = !!this.keys['ShiftLeft'];
   }
 
   consumeSwing() { const s = this.swingQueued; this.swingQueued = null; return s; }

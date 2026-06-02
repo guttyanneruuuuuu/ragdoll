@@ -49,10 +49,12 @@ function boot() {
   }, 250);
 }
 
-// audio unlock
+// audio unlock — iOS Safari only unlocks audio after a touchstart/pointerdown
 const unlock = () => { audio.init(); audio.resume(); };
 ui.on('userInteract', unlock);
 window.addEventListener('pointerdown', unlock, { once: true });
+window.addEventListener('touchstart', unlock, { once: true, passive: true });
+window.addEventListener('keydown', unlock, { once: true });
 
 // ---- AI mode ----
 ui.on('startAI', ({ difficulty, weapon, stage }) => {

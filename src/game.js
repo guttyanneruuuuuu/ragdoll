@@ -311,13 +311,49 @@ export class Game {
 
   // ---- apply local input ----
   applyLocalInput() {
+    // In local 2P, P1 uses WASD only so arrows are free for P2.
+    this.input.pollDesktop(this.mode === 'local');
+
+    // In LOCAL 2P, P2 is driven by arrow keys + Enter to swing.
+    if (this.mode === 'local' && this.fighters[1]) {
+      this._applyLocalP2();
+    }
+
     const f = this.fighters[this.localIndex];
     if (!f || !f.alive) return;
-    this.input.pollDesktop();
     f.setMove(this.input.move.x, this.input.move.z);
     f.setBlock(this.input.blocking);
     const sw = this.input.consumeSwing();
     if (sw) { f.setSwing(sw.dx, sw.dy); audio.slash(); }
+  }
+
+  // P2 control for local 2P: arrow keys move, "/" or Enter swings,
+  // "RShift" blocks. Touch P2 is not supported (one device, one stick).
+  _applyLocalP2() {
+    const k = this.input.keys || {};
+    const f2 = this.fighters[1];
+    if (!f2 || !f2.alive) return;
+    let x = 0, z = 0;
+    if (k['ArrowUp']) z -= 1;
+    if (k['ArrowDown']) z += 1;
+    if (k['ArrowLeft']) x -= 1;
+    if (k['ArrowRight']) x += 1;
+    const m = Math.hypot(x, z);
+    if (m > 0) { x /= m; z /= m; }
+    f2.setMove(x, z);
+    f2.setBlock(!!(k['ShiftRight'] || k['Slash']));
+    // P2 swing on Enter / NumpadEnter
+    if (!this._p2SwingHeld && (k['Enter'] || k['NumpadEnter'])) {
+      this._p2SwingHeld = true;
+      // swing toward P1
+      const dx = this.fighters[0].nodes.hip.p.x - f2.nodes.hip.p.x;
+      f2.setSwing(dx >= 0 ? 1 : -1, 0.4);
+      audio.slash();
+    } else if (!(k['Enter'] || k['NumpadEnter'])) {
+      this._p2SwingHeld = false;
+    }
+    // P1 in local mode uses WASD only; suppress the shared 'move' override
+    // for P1 by NOT touching it here — pollDesktop already populated move.
   }
 
   updateCamera(dt) {
