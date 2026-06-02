@@ -83,7 +83,7 @@ export class InputManager {
     // only override touch move when keys pressed
     if (m > 0 || this._lastKeyMove) { this.move.x = x; this.move.z = z; }
     this._lastKeyMove = m > 0;
-    this.blocking = this.blocking || !!this.keys['Space'];
+    this.blocking = !!this.keys['Space'];
   }
 
   consumeSwing() { const s = this.swingQueued; this.swingQueued = null; return s; }

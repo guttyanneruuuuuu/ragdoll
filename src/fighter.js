@@ -368,6 +368,7 @@ export class Fighter {
     }
     this.facing = s.facing;
     this.alive = s.alive;
+    this.swinging = !!s.swinging;
     for (const j of s.locked || []) this.locked[j] = true;
     for (const nse of s.severed || []) this.severed[nse] = true;
   }
