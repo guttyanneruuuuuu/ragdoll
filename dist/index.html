@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>⚔ RAGBLADE ARENA — Ragdoll Blade 3D</title>
+  <script type="module" crossorigin src="./assets/index-BfhZw5r7.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DOIpnN8E.css">
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ============ LOADING ============ -->
+  <div id="loading" class="overlay show">
+    <div class="logo">⚔ RAGBLADE<span> ARENA</span></div>
+    <div class="load-track"><div id="load-bar"></div></div>
+    <div id="load-text">起動中...</div>
+  </div>
+
+  <!-- ============ MAIN MENU ============ -->
+  <div class="screen" data-screen="menu">
+    <div class="title">⚔ RAGBLADE <span>ARENA</span></div>
+    <div class="subtitle">ラグドール物理 × 剣戟 × オンライン対戦</div>
+    <div class="menu-buttons">
+      <button id="btn-ai" class="btn primary">🤖 AI 対戦</button>
+      <button id="btn-online" class="btn">🌐 友達と対戦</button>
+      <button id="btn-local" class="btn">👥 ローカル2P</button>
+      <button id="btn-howto" class="btn ghost">❔ あそびかた</button>
+    </div>
+    <div class="credit">v3.0 · Three.js · Verlet Physics</div>
+  </div>
+
+  <!-- ============ AI SETUP ============ -->
+  <div class="screen" data-screen="ai-setup">
+    <div class="panel">
+      <h2>🤖 AI 対戦</h2>
+      <label>難易度</label>
+      <div id="ai-diff" class="diff-row">
+        <button class="diff-btn" data-diff="easy">EASY</button>
+        <button class="diff-btn sel" data-diff="normal">NORMAL</button>
+        <button class="diff-btn" data-diff="hard">HARD</button>
+        <button class="diff-btn" data-diff="insane">INSANE</button>
+      </div>
+      <label>武器</label>
+      <select id="ai-weapon"></select>
+      <label>ステージ</label>
+      <select id="ai-stage"></select>
+      <div class="row">
+        <button class="btn ghost" data-back="menu">戻る</button>
+        <button id="ai-start" class="btn primary">対戦開始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LOCAL SETUP ============ -->
+  <div class="screen" data-screen="local-setup">
+    <div class="panel">
+      <h2>👥 ローカル2P</h2>
+      <p class="hint">同じ端末で2人対戦。P1=左ジョイ/WASD、剣は右ジョイ/マウス。</p>
+      <label>P1 武器</label>
+      <select id="local-weapon1"></select>
+      <label>P2 武器</label>
+      <select id="local-weapon2"></select>
+      <label>ステージ</label>
+      <select id="local-stage"></select>
+      <div class="row">
+        <button class="btn ghost" data-back="menu">戻る</button>
+        <button id="local-start" class="btn primary">対戦開始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ONLINE SETUP ============ -->
+  <div class="screen" data-screen="online-setup">
+    <div class="panel">
+      <h2>🌐 友達と対戦</h2>
+      <div class="online-tabs">
+        <button class="tab active" data-tab="host">ルーム作成</button>
+        <button class="tab" data-tab="join">参加する</button>
+      </div>
+      <div id="host-panel">
+        <label>あなたの名前</label>
+        <input id="host-name" type="text" maxlength="12" placeholder="Host" />
+        <label>武器</label>
+        <select id="online-weapon"></select>
+        <label>ステージ</label>
+        <select id="online-stage"></select>
+        <button id="host-create" class="btn primary full">ルームを作成</button>
+      </div>
+      <div id="join-panel" style="display:none">
+        <label>ルームコード</label>
+        <input id="join-code" type="text" maxlength="4" placeholder="ABCD" style="text-transform:uppercase" />
+        <label>あなたの名前</label>
+        <input id="join-name" type="text" maxlength="12" placeholder="Guest" />
+        <button id="join-go" class="btn primary full">参加する</button>
+      </div>
+      <div class="row">
+        <button class="btn ghost" data-back="menu">戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ONLINE LOBBY ============ -->
+  <div class="screen" data-screen="online-lobby">
+    <div class="panel">
+      <h2>🌐 ルーム</h2>
+      <div class="room-code-box">
+        <div class="rc-label">ルームコード</div>
+        <div id="room-code-display" class="rc">----</div>
+      </div>
+      <div class="link-box">
+        <div id="room-link" class="room-link"></div>
+        <button id="copy-link" class="btn small">🔗 招待リンクをコピー</button>
+      </div>
+      <label>参加者</label>
+      <ul id="peer-list" class="peer-list"></ul>
+      <div id="waiting-host" class="hint" style="display:none">ホストの開始を待っています...</div>
+      <div class="row">
+        <button class="btn ghost" data-back="menu">退出</button>
+        <button id="online-start-match" class="btn primary">対戦開始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HOWTO ============ -->
+  <div class="screen" data-screen="howto">
+    <div class="panel">
+      <h2>❔ あそびかた</h2>
+      <ul class="howto-list">
+        <li><b>移動</b>：左の青ジョイスティック / WASD・矢印キー</li>
+        <li><b>斬撃</b>：右の黄ジョイスティックを倒して離す / マウスをドラッグ</li>
+        <li><b>ガード</b>：右クリック長押し / Space</li>
+        <li><b>関節ロック</b>：斬られた部位の関節が動かなくなる。4箇所ロックでKO！</li>
+        <li><b>切断</b>：ダメージが大きいと部位が吹き飛ぶ＝即KO</li>
+        <li><b>リングアウト</b>：場外に落ちると敗北（ステージによる）</li>
+        <li><b>勝利条件</b>：2本先取（Best of 3）</li>
+      </ul>
+      <div class="row">
+        <button class="btn primary" data-back="menu">わかった！</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAME HUD ============ -->
+  <div class="screen" data-screen="game">
+    <div id="hud">
+      <div class="hud-side left">
+        <div class="hud-name" id="hud-name1">P1</div>
+        <div class="hp-track"><div id="hud-hp1" class="hp-fill p1"></div></div>
+      </div>
+      <div class="hud-center">
+        <span id="hud-score1" class="score">0</span>
+        <span class="vs">VS</span>
+        <span id="hud-score2" class="score">0</span>
+      </div>
+      <div class="hud-side right">
+        <div class="hud-name" id="hud-name2">P2</div>
+        <div class="hp-track"><div id="hud-hp2" class="hp-fill p2"></div></div>
+      </div>
+    </div>
+    <button id="btn-pause" class="pause-btn">⏸</button>
+    <div id="announce" class="announce"></div>
+  </div>
+
+  <!-- ============ TOUCH CONTROLS ============ -->
+  <div id="touch-controls">
+    <div id="joy-left" class="joy-zone left"></div>
+    <div id="joy-right" class="joy-zone right"></div>
+    <div class="joy-hint left">移動</div>
+    <div class="joy-hint right">斬撃</div>
+  </div>
+
+  <!-- ============ PAUSE ============ -->
+  <div id="pause-overlay" class="modal">
+    <div class="modal-box">
+      <h2>一時停止</h2>
+      <button id="resume" class="btn primary full">再開</button>
+      <button id="quit" class="btn ghost full">メニューへ</button>
+    </div>
+  </div>
+
+  <!-- ============ RESULT ============ -->
+  <div id="result-overlay" class="modal">
+    <div class="modal-box">
+      <div id="result-text" class="win">YOU WIN!</div>
+      <button id="result-rematch" class="btn primary full">もう一度</button>
+      <button id="result-menu" class="btn ghost full">メニューへ</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+</body>
+</html>
