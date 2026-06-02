@@ -18,6 +18,7 @@ export class InputManager {
 
   initTouch(leftEl, rightEl) {
     this.destroy();
+    this._touchEls = { left: leftEl, right: rightEl };
     const left = nipplejs.create({
       zone: leftEl, mode: 'static', position: { left: '50%', top: '50%' },
       color: '#00e5ff', size: 130,
@@ -47,6 +48,8 @@ export class InputManager {
     });
 
     this._joysticks = [left, right];
+    // force a tiny delay then refresh to ensure nipplejs catches the correct DOM sizes
+    setTimeout(() => { for (const j of this._joysticks) if (j.ui) j.on('resize', () => {}); }, 100);
   }
 
   initDesktop(canvas) {

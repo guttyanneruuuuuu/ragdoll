@@ -185,6 +185,9 @@ export class Game {
         if (speed < DAMAGE.hitThreshold * 0.85) continue;
         if (victim.blocking && this.blockChance(attacker, victim)) {
           audio.clang();
+          if (attacker === this.fighters[this.localIndex] && navigator.vibrate) {
+            navigator.vibrate(20);
+          }
           this.effects.burst(tip.x, tip.y, tip.z, 18, 0x88ddff);
           this.effects.shake(0.2, 0.12);
           // bounce attacker back
@@ -195,6 +198,9 @@ export class Game {
         const hv = { x: v.x * 60, y: Math.abs(v.y * 60) + 3, z: v.z * 60 };
         victim.applyImpact(name, energy, hv);
         audio.hit();
+        if (attacker === this.fighters[this.localIndex] && navigator.vibrate) {
+          navigator.vibrate(40);
+        }
         this.effects.burst(node.p.x, node.p.y, node.p.z, 22, 0xff4422);
         this.effects.shake(0.35, 0.18); this.effects.stop(0.05);
         attacker.swinging = false; // one hit per swing
@@ -211,14 +217,29 @@ export class Game {
   }
 
   checkSwordClash(a, b) {
-    if (!a.swinging || !b.swinging) return;
-    const ta = a.swordTip(), tb = b.swordTip();
-    if (dist(ta, tb) < 0.9) {
+    // only clash if both are either swinging or blocking
+    if (!(a.swinging || a.blocking) || !(b.swinging || b.blocking)) return;
+    
+    const tipA = a.swordTip(), handA = a.nodes.handR.p;
+    const tipB = b.swordTip(), handB = b.nodes.handR.p;
+
+    // segment-segment distance
+    const { d, p1, p2 } = segSegDist(handA, tipA, handB, tipB);
+    
+    if (d < 0.45) {
       audio.clang();
-      const mx = (ta.x + tb.x) / 2, my = (ta.y + tb.y) / 2, mz = (ta.z + tb.z) / 2;
+      if (navigator.vibrate) navigator.vibrate(25);
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2, mz = (p1.z + p2.z) / 2;
       this.effects.burst(mx, my, mz, 24, 0xffee88);
       this.effects.shake(0.3, 0.15);
-      a.swinging = false; b.swinging = false;
+      
+      // bounce both hands back slightly
+      const va = a.nodes.handR.vel(), vb = b.nodes.handR.vel();
+      a.nodes.handR.pp.x = a.nodes.handR.p.x + va.x * 0.5;
+      b.nodes.handR.pp.x = b.nodes.handR.p.x + vb.x * 0.5;
+      
+      if (a.swinging) a.swinging = false;
+      if (b.swinging) b.swinging = false;
     }
   }
 
@@ -343,4 +364,28 @@ function pointSegDist(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   const cx = a.x + abx * t, cy = a.y + aby * t, cz = a.z + abz * t;
   return Math.hypot(p.x - cx, p.y - cy, p.z - cz);
+}
+
+// distance between two segments L1(P1, P2) and L2(P3, P4)
+function segSegDist(p1, p2, p3, p4) {
+  const ux = p2.x - p1.x, uy = p2.y - p1.y, uz = p2.z - p1.z;
+  const vx = p4.x - p3.x, vy = p4.y - p3.y, vz = p4.z - p3.z;
+  const wx = p1.x - p3.x, wy = p1.y - p3.y, wz = p1.z - p3.z;
+  const a = ux * ux + uy * uy + uz * uz;
+  const b = ux * vx + uy * vy + uz * vz;
+  const c = vx * vx + vy * vy + vz * vz;
+  const d = ux * wx + uy * wy + uz * wz;
+  const e = vx * wx + vy * wy + vz * wz;
+  const D = a * c - b * b;
+  let sc, tc;
+  if (D < 1e-6) { sc = 0.0; tc = (b > c ? d / b : e / c); }
+  else {
+    sc = (b * e - c * d) / D;
+    tc = (a * e - b * d) / D;
+  }
+  sc = Math.max(0, Math.min(1, sc));
+  tc = Math.max(0, Math.min(1, tc));
+  const c1 = { x: p1.x + sc * ux, y: p1.y + sc * uy, z: p1.z + sc * uz };
+  const c2 = { x: p3.x + tc * vx, y: p3.y + tc * vy, z: p3.z + tc * vz };
+  return { d: Math.hypot(c1.x - c2.x, c1.y - c2.y, c1.z - c2.z), p1: c1, p2: c2 };
 }

@@ -18,9 +18,15 @@ export class UIManager {
     // hide the boot loading overlay once any screen is shown
     document.getElementById('loading')?.classList.remove('show');
     for (const [k, el] of Object.entries(this.screens)) el.classList.toggle('active', k === name);
-    document.getElementById('touch-controls').style.display = name === 'game' ? 'block' : 'none';
-    document.getElementById('hud').style.display = name === 'game' ? 'flex' : 'none';
-    document.getElementById('btn-pause').style.display = name === 'game' ? 'block' : 'none';
+    const isGame = name === 'game';
+    document.getElementById('touch-controls').style.display = isGame ? 'block' : 'none';
+    document.getElementById('hud').style.display = isGame ? 'flex' : 'none';
+    document.getElementById('btn-pause').style.display = isGame ? 'block' : 'none';
+
+    // re-init touch if entering game to fix nipplejs sizing issues when elements were hidden
+    if (isGame && this.input) {
+      this.input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
+    }
   }
   hide(name) { this.screens[name]?.classList.remove('active'); }
 
