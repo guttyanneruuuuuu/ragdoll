@@ -24,7 +24,8 @@ export class UIManager {
     document.getElementById('btn-pause').style.display = isGame ? 'block' : 'none';
 
     // re-init touch if entering game to fix nipplejs sizing issues when elements were hidden
-    if (isGame && this.input) {
+    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (isGame && this.input && hasTouch) {
       this.input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
     }
   }
@@ -155,11 +156,20 @@ export class UIManager {
     document.getElementById('hud-score2').textContent = scores[1];
   }
   updateBars(fighters) {
-    // health = inverse of locked joints / severed
+    // health = inverse of locked joints, severed parts, AND accumulated
+    // pre-lock energy (so the bar moves smoothly with every hit, not
+    // just in 22% chunks when a joint locks)
     fighters.forEach((f, i) => {
       const locked = f.jointLockCount();
       const sev = Object.keys(f.severed).length;
-      const hp = Math.max(0, 100 - locked * 22 - sev * 30);
+      // soft damage from accumulated impact energy (capped at lockEnergy per node)
+      let soft = 0;
+      for (const k of Object.keys(f.energy)) {
+        // each un-locked node contributes up to ~5% extra damage
+        const e = Math.min(f.energy[k], 22); // DAMAGE.lockEnergy
+        soft += (e / 22) * 5;
+      }
+      const hp = Math.max(0, 100 - locked * 20 - sev * 28 - soft);
       const bar = document.getElementById('hud-hp' + (i + 1));
       if (bar) bar.style.width = (f.alive ? hp : 0) + '%';
     });

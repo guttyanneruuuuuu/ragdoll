@@ -17,12 +17,24 @@ ui.input = input;
 let game = null;
 let net = null;
 
+// Detect touch-capable device. On hybrid devices we enable BOTH paths.
+const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const isMobileWidth = window.innerWidth < 900;
+
 function boot() {
   ui.setLoading(30, 'シーンを構築中...');
   game = new Game(canvas, ui, input);
   ui.setLoading(70, 'コントロールを準備中...');
-  // touch joysticks
-  input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
+  // touch joysticks (always init so hybrid devices work)
+  if (hasTouch) {
+    input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
+  } else {
+    // On pure desktop, completely disable pointer events on joy zones so
+    // clicking the bottom half of the canvas doesn't summon a joystick.
+    document.getElementById('joy-left')?.style.setProperty('pointer-events', 'none');
+    document.getElementById('joy-right')?.style.setProperty('pointer-events', 'none');
+    document.querySelectorAll('.joy-hint').forEach(el => el.style.display = 'none');
+  }
   input.initDesktop(canvas);
   ui.setLoading(100, '準備完了！');
   setTimeout(() => {
