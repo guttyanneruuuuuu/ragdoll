@@ -165,9 +165,26 @@ export class Game {
   resolveCombat(dt) {
     const [a, b] = this.fighters;
     if (!a || !b) return;
-    this.checkSwordHits(a, b);
-    this.checkSwordHits(b, a);
-    this.checkSwordClash(a, b);
+    // Sword-vs-sword clash is checked FIRST so that two simultaneous
+    // attacks parry each other instead of both landing on the body.
+    const clashed = this.checkSwordClash(a, b);
+    if (!clashed) {
+      this.checkSwordHits(a, b);
+      this.checkSwordHits(b, a);
+    }
+  }
+
+  // Vibration helper — only buzz when the LOCAL player is involved,
+  // and only if the device actually supports it. Pattern instead of
+  // a single value gives a punchier feel.
+  _vibrate(pattern) {
+    if (!navigator.vibrate) return;
+    try { navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  _isLocalFighter(f) {
+    if (this.mode === 'local') return true; // both players are local
+    return f === this.fighters[this.localIndex];
   }
 
   checkSwordHits(attacker, victim) {
@@ -178,13 +195,17 @@ export class Game {
     for (const [name, node] of Object.entries(victim.nodes)) {
       if (victim.severed[name]) continue;
       const d = pointSegDist(node.p, hand, tip);
-      if (d < node.radius + 0.4) {
+      // Slightly more generous hit radius for better feel
+      if (d < node.radius + 0.5) {
         // compute hand velocity as impact energy
         const v = attacker.nodes.handR.vel();
         const speed = Math.hypot(v.x, v.y, v.z) * 60; // per-second-ish
         if (speed < DAMAGE.hitThreshold * 0.85) continue;
         if (victim.blocking && this.blockChance(attacker, victim)) {
           audio.clang();
+          // Both players feel the parry (the blocker REALLY feels it)
+          if (this._isLocalFighter(attacker)) this._vibrate(20);
+          if (this._isLocalFighter(victim))   this._vibrate([15, 30, 15]);
           this.effects.burst(tip.x, tip.y, tip.z, 18, 0x88ddff);
           this.effects.shake(0.2, 0.12);
           // bounce attacker back
@@ -195,8 +216,21 @@ export class Game {
         const hv = { x: v.x * 60, y: Math.abs(v.y * 60) + 3, z: v.z * 60 };
         victim.applyImpact(name, energy, hv);
         audio.hit();
+
+        // ---- Haptic feedback on hit ----
+        // Stronger pattern for clean hits, even bigger for headshots / severing energy
+        const heavy = energy > DAMAGE.severEnergy * 0.7 || name === 'head';
+        if (this._isLocalFighter(attacker)) {
+          this._vibrate(heavy ? [60, 30, 80] : [40]);
+        }
+        if (this._isLocalFighter(victim)) {
+          // Victim feels a longer rumble when struck
+          this._vibrate(heavy ? [90, 40, 50] : [55]);
+        }
+
         this.effects.burst(node.p.x, node.p.y, node.p.z, 22, 0xff4422);
-        this.effects.shake(0.35, 0.18); this.effects.stop(0.05);
+        this.effects.shake(heavy ? 0.55 : 0.35, heavy ? 0.25 : 0.18);
+        this.effects.stop(heavy ? 0.09 : 0.05);
         attacker.swinging = false; // one hit per swing
         break;
       }
@@ -210,27 +244,116 @@ export class Game {
     return (dx > 0) === facingRight ? Math.random() < 0.85 : Math.random() < 0.2;
   }
 
+  // ---- Sword-vs-Sword clash (blade-on-blade hit detection) ----
+  // Triggers whenever the two blades intersect closely, regardless of
+  // whether each fighter is swinging or just holding. This gives the
+  // "katanas crossing" feel that was missing.
   checkSwordClash(a, b) {
-    if (!a.swinging || !b.swinging) return;
-    const ta = a.swordTip(), tb = b.swordTip();
-    if (dist(ta, tb) < 0.9) {
-      audio.clang();
-      const mx = (ta.x + tb.x) / 2, my = (ta.y + tb.y) / 2, mz = (ta.z + tb.z) / 2;
-      this.effects.burst(mx, my, mz, 24, 0xffee88);
-      this.effects.shake(0.3, 0.15);
-      a.swinging = false; b.swinging = false;
+    if (!a.alive || !b.alive) return false;
+    if (a.locked.armR || b.locked.armR) return false;
+    if (a.severed.handR || b.severed.handR) return false;
+
+    const tipA = a.swordTip(), handA = a.nodes.handR.p;
+    const tipB = b.swordTip(), handB = b.nodes.handR.p;
+
+    // segment-segment distance between the two blades
+    const { d, p1, p2 } = segSegDist(handA, tipA, handB, tipB);
+
+    // Generous threshold — blades have thickness in reality
+    if (d >= 0.55) return false;
+
+    // Throttle clashes so they don't fire every frame while blades drag.
+    // Per-pair cooldown of ~200ms.
+    const now = performance.now();
+    this._lastClashTime = this._lastClashTime || 0;
+    if (now - this._lastClashTime < 180) return false;
+    this._lastClashTime = now;
+
+    // Compute combined impact energy from both hands
+    const va = a.nodes.handR.vel(), vb = b.nodes.handR.vel();
+    const speedA = Math.hypot(va.x, va.y, va.z) * 60;
+    const speedB = Math.hypot(vb.x, vb.y, vb.z) * 60;
+    const intensity = Math.min(1, (speedA + speedB) / 24);
+
+    audio.clang();
+    // Vibrate BOTH local players — clash should feel symmetric
+    if (this._isLocalFighter(a)) this._vibrate([25, 20, 35]);
+    if (this._isLocalFighter(b)) this._vibrate([25, 20, 35]);
+
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2, mz = (p1.z + p2.z) / 2;
+    // Bigger, brighter sparks scaled by intensity
+    this.effects.burst(mx, my, mz, 18 + Math.floor(intensity * 22), 0xffee88);
+    this.effects.burst(mx, my, mz, 8 + Math.floor(intensity * 10), 0xffffff);
+    this.effects.shake(0.25 + intensity * 0.4, 0.15 + intensity * 0.15);
+    this.effects.stop(0.04 + intensity * 0.05);
+
+    // Push both hands apart along the clash normal (perpendicular-ish bounce)
+    const nx = (handA.x - handB.x), ny = (handA.y - handB.y), nz = (handA.z - handB.z);
+    const nm = Math.hypot(nx, ny, nz) || 1;
+    const push = 0.35 + intensity * 0.45;
+    a.nodes.handR.pp.x = a.nodes.handR.p.x - (nx / nm) * push * 0.5;
+    a.nodes.handR.pp.y = a.nodes.handR.p.y - (ny / nm) * push * 0.5;
+    b.nodes.handR.pp.x = b.nodes.handR.p.x + (nx / nm) * push * 0.5;
+    b.nodes.handR.pp.y = b.nodes.handR.p.y + (ny / nm) * push * 0.5;
+
+    // Stronger clashes can stagger both fighters briefly
+    if (intensity > 0.55) {
+      a.stagger = Math.max(a.stagger, 0.18);
+      b.stagger = Math.max(b.stagger, 0.18);
     }
+
+    // Cancel ongoing swings — the parry interrupts them
+    if (a.swinging) a.swinging = false;
+    if (b.swinging) b.swinging = false;
+
+    return true;
   }
 
   // ---- apply local input ----
   applyLocalInput() {
+    // In local 2P, P1 uses WASD only so arrows are free for P2.
+    this.input.pollDesktop(this.mode === 'local');
+
+    // In LOCAL 2P, P2 is driven by arrow keys + Enter to swing.
+    if (this.mode === 'local' && this.fighters[1]) {
+      this._applyLocalP2();
+    }
+
     const f = this.fighters[this.localIndex];
     if (!f || !f.alive) return;
-    this.input.pollDesktop();
     f.setMove(this.input.move.x, this.input.move.z);
     f.setBlock(this.input.blocking);
     const sw = this.input.consumeSwing();
     if (sw) { f.setSwing(sw.dx, sw.dy); audio.slash(); }
+  }
+
+  // P2 control for local 2P: arrow keys move, "/" or Enter swings,
+  // "RShift" blocks. Touch P2 is not supported (one device, one stick).
+  _applyLocalP2() {
+    const k = this.input.keys || {};
+    const f2 = this.fighters[1];
+    if (!f2 || !f2.alive) return;
+    let x = 0, z = 0;
+    if (k['ArrowUp']) z -= 1;
+    if (k['ArrowDown']) z += 1;
+    if (k['ArrowLeft']) x -= 1;
+    if (k['ArrowRight']) x += 1;
+    const m = Math.hypot(x, z);
+    if (m > 0) { x /= m; z /= m; }
+    f2.setMove(x, z);
+    f2.setBlock(!!(k['ShiftRight'] || k['Slash']));
+    // P2 swing on Enter / NumpadEnter
+    if (!this._p2SwingHeld && (k['Enter'] || k['NumpadEnter'])) {
+      this._p2SwingHeld = true;
+      // swing toward P1
+      const dx = this.fighters[0].nodes.hip.p.x - f2.nodes.hip.p.x;
+      f2.setSwing(dx >= 0 ? 1 : -1, 0.4);
+      audio.slash();
+    } else if (!(k['Enter'] || k['NumpadEnter'])) {
+      this._p2SwingHeld = false;
+    }
+    // P1 in local mode uses WASD only; suppress the shared 'move' override
+    // for P1 by NOT touching it here — pollDesktop already populated move.
   }
 
   updateCamera(dt) {
@@ -343,4 +466,28 @@ function pointSegDist(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   const cx = a.x + abx * t, cy = a.y + aby * t, cz = a.z + abz * t;
   return Math.hypot(p.x - cx, p.y - cy, p.z - cz);
+}
+
+// distance between two segments L1(P1, P2) and L2(P3, P4)
+function segSegDist(p1, p2, p3, p4) {
+  const ux = p2.x - p1.x, uy = p2.y - p1.y, uz = p2.z - p1.z;
+  const vx = p4.x - p3.x, vy = p4.y - p3.y, vz = p4.z - p3.z;
+  const wx = p1.x - p3.x, wy = p1.y - p3.y, wz = p1.z - p3.z;
+  const a = ux * ux + uy * uy + uz * uz;
+  const b = ux * vx + uy * vy + uz * vz;
+  const c = vx * vx + vy * vy + vz * vz;
+  const d = ux * wx + uy * wy + uz * wz;
+  const e = vx * wx + vy * wy + vz * wz;
+  const D = a * c - b * b;
+  let sc, tc;
+  if (D < 1e-6) { sc = 0.0; tc = (b > c ? d / b : e / c); }
+  else {
+    sc = (b * e - c * d) / D;
+    tc = (a * e - b * d) / D;
+  }
+  sc = Math.max(0, Math.min(1, sc));
+  tc = Math.max(0, Math.min(1, tc));
+  const c1 = { x: p1.x + sc * ux, y: p1.y + sc * uy, z: p1.z + sc * uz };
+  const c2 = { x: p3.x + tc * vx, y: p3.y + tc * vy, z: p3.z + tc * vz };
+  return { d: Math.hypot(c1.x - c2.x, c1.y - c2.y, c1.z - c2.z), p1: c1, p2: c2 };
 }

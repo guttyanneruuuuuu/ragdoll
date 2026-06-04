@@ -19,6 +19,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
   align-items: center; justify-content: center; z-index: 10; padding: 20px;
 }
 .overlay.show, .screen.active { display: flex; }
+.screen[data-screen="game"] { pointer-events: none; }
+.screen[data-screen="game"] > * { pointer-events: auto; }
 
 /* loading */
 #loading { background: radial-gradient(circle at 50% 40%, #16203f, #05060f); }
@@ -126,13 +128,30 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
 
 /* ---- touch controls ---- */
 #touch-controls { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none; }
-.joy-zone { position: absolute; bottom: 0; width: 50%; height: 50%; pointer-events: auto; }
-.joy-zone.left { left: 0; }
-.joy-zone.right { right: 0; }
-.joy-hint { position: absolute; bottom: 14px; font-size: 12px; opacity: 0.4; font-weight: 700;
-  pointer-events: none; }
-.joy-hint.left { left: 22%; color: var(--cyan); }
-.joy-hint.right { right: 22%; color: var(--gold); }
+.joy-zone {
+  position: absolute; bottom: 0; width: 50%; height: 55%;
+  pointer-events: auto;
+  touch-action: none; /* CRITICAL: prevent browser scroll/zoom hijacking the touch */
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  /* Soft radial hint so players can see the active zone */
+  background: radial-gradient(circle at 30% 70%, rgba(255,255,255,0.04) 0%, transparent 55%);
+}
+.joy-zone.left {
+  left: 0;
+  background: radial-gradient(circle at 30% 70%, rgba(0,229,255,0.07) 0%, transparent 55%);
+}
+.joy-zone.right {
+  right: 0;
+  background: radial-gradient(circle at 70% 70%, rgba(255,210,74,0.07) 0%, transparent 55%);
+}
+.joy-hint { position: absolute; bottom: 18px; font-size: 13px; opacity: 0.55; font-weight: 700;
+  pointer-events: none; letter-spacing: 1px; }
+.joy-hint.left { left: 22%; color: var(--cyan); text-shadow: 0 0 8px rgba(0,229,255,0.5); }
+.joy-hint.right { right: 22%; color: var(--gold); text-shadow: 0 0 8px rgba(255,210,74,0.5); }
+
+/* nipplejs stick visuals — make sure they sit above zones and below modals */
+.nipple { z-index: 5 !important; }
 
 /* ---- modals ---- */
 .modal { position: fixed; inset: 0; background: rgba(5,6,15,0.85); display: none;
