@@ -19,6 +19,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
   align-items: center; justify-content: center; z-index: 10; padding: 20px;
 }
 .overlay.show, .screen.active { display: flex; }
+.screen[data-screen="game"] { pointer-events: none; }
+.screen[data-screen="game"] > * { pointer-events: auto; }
 
 /* loading */
 #loading { background: radial-gradient(circle at 50% 40%, #16203f, #05060f); }

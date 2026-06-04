@@ -50,7 +50,7 @@ export class InputManager {
     // it stays where you put it until release. Much better UX than 'static'.
     const left = nipplejs.create({
       zone: leftEl,
-      mode: 'semi',
+      mode: 'dynamic',
       catchDistance: 200,
       color: '#00e5ff',
       size: 130,
@@ -71,7 +71,7 @@ export class InputManager {
     // ---- RIGHT: sword swing direction ----
     const right = nipplejs.create({
       zone: rightEl,
-      mode: 'semi',
+      mode: 'dynamic',
       catchDistance: 200,
       color: '#ffd24a',
       size: 140,
