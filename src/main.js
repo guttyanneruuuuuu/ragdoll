@@ -14,6 +14,13 @@ const ui = new UIManager();
 const input = new InputManager();
 ui.input = input;
 
+// Lightweight debug hook so automated tests (and the console) can inspect
+// the live input state. Harmless in production.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__inputMove', { get: () => input.move });
+  window.__input = input;
+}
+
 let game = null;
 let net = null;
 
@@ -37,16 +44,14 @@ function boot() {
   }
   input.initDesktop(canvas);
   ui.setLoading(100, '準備完了！');
-  setTimeout(() => {
-    ui.show('menu');
-    // auto-join via ?room=CODE
-    const room = new URLSearchParams(location.search).get('room');
-    if (room) {
-      ui.show('online-setup');
-      document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
-      document.getElementById('join-code').value = room.toUpperCase();
-    }
-  }, 250);
+  // 即座にメニューを表示
+  ui.show('menu');
+  const room = new URLSearchParams(location.search).get('room');
+  if (room) {
+    ui.show('online-setup');
+    document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+    document.getElementById('join-code').value = room.toUpperCase();
+  }
 }
 
 // audio unlock — iOS Safari only unlocks audio after a touchstart/pointerdown

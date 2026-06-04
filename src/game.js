@@ -8,6 +8,7 @@ import { Fighter } from './fighter.js';
 import { Arena } from './arena.js';
 import { Effects } from './effects.js';
 import { audio } from './audio.js';
+import { haptics } from './haptics.js';
 import { AIController } from './ai.js';
 import { COLORS, DAMAGE, WEAPONS } from './config.js';
 
@@ -20,7 +21,7 @@ export class Game {
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -174,12 +175,12 @@ export class Game {
     }
   }
 
-  // Vibration helper — only buzz when the LOCAL player is involved,
-  // and only if the device actually supports it. Pattern instead of
-  // a single value gives a punchier feel.
+  // Vibration helper — delegates to the robust haptics module which
+  // throttles bursts (so rapid hits don't cancel each other), unlocks
+  // after a user gesture, and falls back to an audio "thump" on devices
+  // with no vibration motor (e.g. iOS Safari).
   _vibrate(pattern) {
-    if (!navigator.vibrate) return;
-    try { navigator.vibrate(pattern); } catch (e) {}
+    haptics.buzz(pattern);
   }
 
   _isLocalFighter(f) {

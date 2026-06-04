@@ -50,6 +50,25 @@ class AudioEngine {
   lose()  { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, 0.35, 'sine', 0.2), i * 140)); }
   blip()  { this.tone(660, 0.08, 'square', 0.12); }
 
+  // Tactile fallback for devices without a vibration motor (e.g. iOS).
+  // A short low-frequency sine "thump" the body feels through the speaker.
+  // strength 0..1 scales loudness & duration.
+  thump(strength = 0.5) {
+    if (!this.ctx || !this.enabled) return;
+    const s = Math.max(0.05, Math.min(1, strength));
+    const dur = 0.05 + s * 0.09;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, this.ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(45, this.ctx.currentTime + dur);
+    g.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.35 * s, this.ctx.currentTime + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(); o.stop(this.ctx.currentTime + dur + 0.02);
+  }
+
   startMusic() {
     if (!this.ctx || this._music) return;
     // simple synthwave drone + pulse

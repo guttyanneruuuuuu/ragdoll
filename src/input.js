@@ -1,15 +1,20 @@
 // ============================================================
-// Input — dual virtual joysticks (move + sword) via nipplejs,
-// plus desktop keyboard/mouse fallback.
+// Input — dual virtual joysticks (move + sword), implemented with
+// raw Pointer Events for maximum reliability across browsers.
 //   left stick  -> movement direction
 //   right stick -> sword swing direction (release = slash)
 //
-// NOTE: We use mode: 'semi' so the joystick appears wherever the
-// player first touches inside the zone. This solves "I tap but
-// nothing happens" complaints from mode: 'static' where the pad
-// is invisible/fixed and players miss it.
+// WHY NOT nipplejs?
+//   nipplejs measures the zone on creation; if the zone is display:none
+//   (as the touch-controls are until the game screen is shown) the pads
+//   silently fail to bind, producing the classic "I tap but nothing
+//   happens" bug. A small self-contained pointer-events implementation
+//   avoids that entirely, draws its own visual stick, and works the
+//   instant the zone becomes visible — no RAF timing games required.
+//
+// DYNAMIC mode: the stick base appears wherever the finger first lands
+// inside the zone and follows release, so players never "miss" the pad.
 // ============================================================
-import nipplejs from 'nipplejs';
 
 export class InputManager {
   constructor() {
@@ -17,99 +22,120 @@ export class InputManager {
     this.swingQueued = null;     // {dx,dy} when a swing is fired
     this.blocking = false;
     this._rightVec = { x: 0, y: 0 };
-    this._joysticks = [];
     this.keys = {};
     this._touchEls = null;
+    this._sticks = [];           // {el, base, knob, pointerId, handlers}
+    this._maxRadius = 60;        // px travel of the knob
   }
 
+  // leftEl / rightEl are the .joy-zone containers.
   initTouch(leftEl, rightEl) {
     this.destroy();
     if (!leftEl || !rightEl) return;
     this._touchEls = { left: leftEl, right: rightEl };
 
-    // Make sure layout is settled before nipplejs measures the zones.
-    // Without this, zones can have width/height = 0 and the joystick
-    // never receives touchstart events (the classic "stick doesn't react").
-    const create = () => {
-      // double-check zones have non-zero size; if not, retry next frame
-      const lr = leftEl.getBoundingClientRect();
-      const rr = rightEl.getBoundingClientRect();
-      if (lr.width < 10 || lr.height < 10 || rr.width < 10 || rr.height < 10) {
-        requestAnimationFrame(create);
-        return;
-      }
-      this._buildJoysticks(leftEl, rightEl);
-    };
-    // Wait two RAFs so any display:none -> block change is fully applied
-    requestAnimationFrame(() => requestAnimationFrame(create));
+    this._makeStick(leftEl, 'move');
+    this._makeStick(rightEl, 'sword');
   }
 
-  _buildJoysticks(leftEl, rightEl) {
-    // ---- LEFT: movement ----
-    // semi mode = stick appears where you press; restJoystick=false means
-    // it stays where you put it until release. Much better UX than 'static'.
-    const left = nipplejs.create({
-      zone: leftEl,
-      mode: 'dynamic',
-      catchDistance: 200,
-      color: '#00e5ff',
-      size: 130,
-      restJoystick: true,
-      restOpacity: 0.6,
-      threshold: 0.05,
-      fadeTime: 80,
-    });
-    left.on('start move', (e, d) => {
-      if (!d || !d.angle) return;
-      const a = d.angle.radian;
-      const f = Math.min(d.force, 1.4);
-      this.move.x = Math.cos(a) * f;
-      this.move.z = -Math.sin(a) * f;
-    });
-    left.on('end', () => { this.move.x = 0; this.move.z = 0; });
+  // Build a single dynamic pointer joystick inside `zone`.
+  _makeStick(zone, role) {
+    // Ensure the zone can host absolutely-positioned children & catch touches.
+    zone.style.touchAction = 'none';
+    zone.style.userSelect = 'none';
 
-    // ---- RIGHT: sword swing direction ----
-    const right = nipplejs.create({
-      zone: rightEl,
-      mode: 'dynamic',
-      catchDistance: 200,
-      color: '#ffd24a',
-      size: 140,
-      restJoystick: true,
-      restOpacity: 0.6,
-      threshold: 0.05,
-      fadeTime: 80,
-    });
-    right.on('start move', (e, d) => {
-      if (!d || !d.angle) return;
-      const a = d.angle.radian;
-      const f = Math.min(d.force, 1.8);
-      this._rightVec = { x: Math.cos(a) * f, y: Math.sin(a) * f };
-    });
-    right.on('end', () => {
-      // fire a slash in the held direction (or a default forward slash if tap)
-      const v = this._rightVec;
-      const mag = Math.hypot(v.x, v.y);
-      if (mag > 0.25) {
-        this.swingQueued = { dx: v.x, dy: v.y };
-      } else {
-        // simple tap = horizontal slash in facing direction (handled by fighter)
-        this.swingQueued = { dx: 1, dy: 0.3 };
-      }
-      this._rightVec = { x: 0, y: 0 };
-    });
-
-    this._joysticks = [left, right];
-
-    // Stop the canvas from receiving these touches and swallowing them.
-    // touch-action: none also prevents browser pinch/scroll on the pads.
-    for (const el of [leftEl, rightEl]) {
-      el.style.touchAction = 'none';
-      // Belt-and-suspenders: prevent default on touchstart so the
-      // browser doesn't fire synthesized mouseevents to the canvas.
-      el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-      el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    // Visual elements (created once, reused). Hidden until touched.
+    let base = zone.querySelector('.vjoy-base');
+    let knob;
+    if (!base) {
+      base = document.createElement('div');
+      base.className = 'vjoy-base';
+      knob = document.createElement('div');
+      knob.className = 'vjoy-knob';
+      base.appendChild(knob);
+      zone.appendChild(base);
+    } else {
+      knob = base.querySelector('.vjoy-knob');
     }
+    base.style.display = 'none';
+
+    const accent = role === 'move' ? '#00e5ff' : '#ffd24a';
+    base.style.borderColor = accent;
+    knob.style.background = accent;
+
+    const state = { active: false, pointerId: null, cx: 0, cy: 0 };
+
+    const setVec = (dx, dy) => {
+      // clamp to max radius
+      const mag = Math.hypot(dx, dy);
+      const r = this._maxRadius;
+      let kx = dx, ky = dy;
+      if (mag > r) { kx = (dx / mag) * r; ky = (dy / mag) * r; }
+      knob.style.transform = `translate(${kx}px, ${ky}px)`;
+      const force = Math.min(mag / r, 1.4);
+      // screen-space: +x right, +y down. angle in radians.
+      const ang = Math.atan2(-dy, dx); // up = +PI/2
+      if (role === 'move') {
+        this.move.x = Math.cos(ang) * force;
+        this.move.z = -Math.sin(ang) * force;
+      } else {
+        this._rightVec = { x: Math.cos(ang) * Math.min(force, 1.8), y: Math.sin(ang) * Math.min(force, 1.8) };
+      }
+    };
+
+    const onDown = (e) => {
+      if (state.active) return;
+      e.preventDefault();
+      state.active = true;
+      state.pointerId = e.pointerId;
+      const rect = zone.getBoundingClientRect();
+      state.cx = e.clientX;
+      state.cy = e.clientY;
+      // place the base at the touch point (dynamic mode)
+      base.style.left = (e.clientX - rect.left) + 'px';
+      base.style.top = (e.clientY - rect.top) + 'px';
+      base.style.display = 'block';
+      knob.style.transform = 'translate(0px,0px)';
+      try { zone.setPointerCapture(e.pointerId); } catch (_) {}
+    };
+
+    const onMove = (e) => {
+      if (!state.active || e.pointerId !== state.pointerId) return;
+      e.preventDefault();
+      setVec(e.clientX - state.cx, e.clientY - state.cy);
+    };
+
+    const onUp = (e) => {
+      if (!state.active || e.pointerId !== state.pointerId) return;
+      e.preventDefault();
+      state.active = false;
+      state.pointerId = null;
+      base.style.display = 'none';
+      knob.style.transform = 'translate(0px,0px)';
+      try { zone.releasePointerCapture(e.pointerId); } catch (_) {}
+
+      if (role === 'move') {
+        this.move.x = 0; this.move.z = 0;
+      } else {
+        const v = this._rightVec;
+        const mag = Math.hypot(v.x, v.y);
+        if (mag > 0.25) this.swingQueued = { dx: v.x, dy: v.y };
+        else this.swingQueued = { dx: 1, dy: 0.3 }; // tap = forward slash
+        this._rightVec = { x: 0, y: 0 };
+      }
+    };
+
+    zone.addEventListener('pointerdown', onDown, { passive: false });
+    zone.addEventListener('pointermove', onMove, { passive: false });
+    zone.addEventListener('pointerup', onUp, { passive: false });
+    zone.addEventListener('pointercancel', onUp, { passive: false });
+    // Fallback for very old browsers that synthesize touch but no pointer events.
+    zone.addEventListener('lostpointercapture', onUp, { passive: false });
+
+    this._sticks.push({
+      zone, base, knob, role,
+      handlers: { onDown, onMove, onUp },
+    });
   }
 
   initDesktop(canvas) {
@@ -162,7 +188,17 @@ export class InputManager {
   consumeSwing() { const s = this.swingQueued; this.swingQueued = null; return s; }
 
   destroy() {
-    for (const j of this._joysticks) try { j.destroy(); } catch (e) {}
-    this._joysticks = [];
+    for (const s of this._sticks) {
+      const { zone, handlers } = s;
+      zone.removeEventListener('pointerdown', handlers.onDown);
+      zone.removeEventListener('pointermove', handlers.onMove);
+      zone.removeEventListener('pointerup', handlers.onUp);
+      zone.removeEventListener('pointercancel', handlers.onUp);
+      zone.removeEventListener('lostpointercapture', handlers.onUp);
+      if (s.base && s.base.parentNode) s.base.parentNode.removeChild(s.base);
+    }
+    this._sticks = [];
+    this.move = { x: 0, z: 0 };
+    this._rightVec = { x: 0, y: 0 };
   }
 }

@@ -23,7 +23,10 @@ export class UIManager {
     document.getElementById('hud').style.display = isGame ? 'flex' : 'none';
     document.getElementById('btn-pause').style.display = isGame ? 'block' : 'none';
 
-    // re-init touch if entering game to fix nipplejs sizing issues when elements were hidden
+    // (Re)bind the touch joysticks when entering the game screen. The
+    // pointer-event sticks rebind cleanly (destroy() runs first) and no
+    // longer depend on the zone being measurable, but rebinding here keeps
+    // things tidy if the zones were just made visible.
     const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     if (isGame && this.input && hasTouch) {
       this.input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
