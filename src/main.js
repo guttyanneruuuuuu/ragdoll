@@ -58,6 +58,12 @@ async function boot() {
     await nextFrame();
 
     ui.show('menu');
+    // Dev/test hook: ?autostart=ai jumps straight into an AI match so the
+    // 3D scene can be smoke-tested headlessly. Harmless in production.
+    const auto = new URLSearchParams(location.search).get('autostart');
+    if (auto === 'ai') {
+      setTimeout(() => ui.emit('startAI', { difficulty: 'normal', weapon: 'katana', stage: 'arena' }), 200);
+    }
     const room = new URLSearchParams(location.search).get('room');
     if (room) {
       ui.show('online-setup');
