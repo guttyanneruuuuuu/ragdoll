@@ -158,18 +158,27 @@ export class InputManager {
       knob.style.transform = 'translate(0px,0px)';
       try { zone.releasePointerCapture(e.pointerId); } catch (_) {}
 
-      const svMag = Math.hypot(this.swordVec.x, this.swordVec.y);
-      // On release: if we were pushing the stick, swing toward where it
-      // pointed; a near-zero push counts as a quick tap = forward slash.
-      if (svMag > 0.3) {
-        this.swingQueued = { dx: this.swordVec.x, dy: this.swordVec.y };
-      } else {
-        this.swingQueued = { dx: 1, dy: 0.35 };   // tap = forward slash
+      // On release: only swing if no flick was already triggered mid-drag.
+      // This allows mid-drag flicks to work while keeping the release-swing
+      // as a fallback for slow/deliberate swipes.
+      const now = performance.now();
+      const timeSinceLastFlick = now - (this._lastFlickFire || 0);
+      
+      // If a flick was just fired (within 100ms), don't double-swing on release
+      if (timeSinceLastFlick > 100) {
+        const svMag = Math.hypot(this.swordVec.x, this.swordVec.y);
+        // On release: if we were pushing the stick, swing toward where it
+        // pointed; a near-zero push counts as a quick tap = forward slash.
+        if (svMag > 0.3) {
+          this.swingQueued = { dx: this.swordVec.x, dy: this.swordVec.y };
+        } else {
+          this.swingQueued = { dx: 1, dy: 0.35 };   // tap = forward slash
+        }
       }
       // reset to neutral
       this.swordVec = { x: 0, y: 0 };
       this.move.x = 0; this.move.z = 0;
-    };
+    }
 
     zone.addEventListener('pointerdown', onDown, { passive: false });
     zone.addEventListener('pointermove', onMove, { passive: false });
@@ -209,9 +218,14 @@ export class InputManager {
     window.addEventListener('mouseup', (e) => {
       if (e.button === 2) { this.blocking = false; return; }
       if (down) {
-        const dx = e.clientX - sx, dy = sy - e.clientY;
-        if (Math.hypot(dx, dy) > 12) this.swingQueued = { dx, dy };
-        else this.swingQueued = { dx: 0, dy: 1 };
+        // Only swing on release if no flick was already triggered mid-drag
+        const now = performance.now();
+        const timeSinceLastFlick = now - (this._lastFlickFire || 0);
+        if (timeSinceLastFlick > 100) {
+          const dx = e.clientX - sx, dy = sy - e.clientY;
+          if (Math.hypot(dx, dy) > 12) this.swingQueued = { dx, dy };
+          else this.swingQueued = { dx: 0, dy: 1 };
+        }
         this.swordVec = { x: 0, y: 0 };
       }
       down = false;

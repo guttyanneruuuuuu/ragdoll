@@ -33,6 +33,14 @@ const isMobileWidth = window.innerWidth < 900;
 // screen ("the game won't open" bug). Each await lets the UI breathe.
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
 
+// Timeout watchdog: if boot takes > 8 seconds, show an error
+let bootTimeout = setTimeout(() => {
+  console.error('[boot] timeout: initialization took too long');
+  ui.setLoading(100, '読み込みタイムアウト');
+  const lt = document.getElementById('load-text');
+  if (lt) lt.textContent = '起動がタイムアウトしました。ページをリロードしてください。';
+}, 8000);
+
 async function boot() {
   try {
     ui.setLoading(20, 'シーンを構築中...');
@@ -71,9 +79,12 @@ async function boot() {
       const jc = document.getElementById('join-code');
       if (jc) jc.value = room.toUpperCase();
     }
+    // Boot succeeded: clear the timeout
+    clearTimeout(bootTimeout);
   } catch (err) {
     // Never leave the user stuck on the loading screen. Surface the error.
     console.error('[boot] failed:', err);
+    clearTimeout(bootTimeout);
     ui.setLoading(100, '読み込みエラー');
     const lt = document.getElementById('load-text');
     if (lt) lt.textContent = '起動に失敗しました: ' + (err?.message || err);
