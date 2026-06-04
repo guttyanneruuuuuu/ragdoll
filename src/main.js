@@ -46,7 +46,12 @@ async function boot() {
     ui.setLoading(20, 'シーンを構築中...');
     await nextFrame();
 
-    game = new Game(canvas, ui, input);
+    try {
+      game = new Game(canvas, ui, input);
+    } catch (gameErr) {
+      console.error('[boot] Game init failed:', gameErr);
+      throw new Error('ゲームエンジンの初期化に失敗しました。WebGLがサポートされていないか、メモリ不足の可能性があります。');
+    }
 
     ui.setLoading(65, 'コントロールを準備中...');
     await nextFrame();
@@ -68,16 +73,20 @@ async function boot() {
     ui.show('menu');
     // Dev/test hook: ?autostart=ai jumps straight into an AI match so the
     // 3D scene can be smoke-tested headlessly. Harmless in production.
-    const auto = new URLSearchParams(location.search).get('autostart');
+    const params = new URLSearchParams(location.search);
+    const auto = params.get('autostart');
     if (auto === 'ai') {
       setTimeout(() => ui.emit('startAI', { difficulty: 'normal', weapon: 'katana', stage: 'arena' }), 200);
     }
-    const room = new URLSearchParams(location.search).get('room');
+    const room = params.get('room');
     if (room) {
       ui.show('online-setup');
-      document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
-      const jc = document.getElementById('join-code');
-      if (jc) jc.value = room.toUpperCase();
+      // Use setTimeout to ensure DOM is ready for click
+      setTimeout(() => {
+        document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+        const jc = document.getElementById('join-code');
+        if (jc) jc.value = room.toUpperCase();
+      }, 100);
     }
     // Boot succeeded: clear the timeout
     clearTimeout(bootTimeout);

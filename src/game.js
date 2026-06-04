@@ -31,12 +31,17 @@ export class Game {
     // On phones, render at a slightly reduced pixel ratio for a big perf win.
     const effectiveDpr = isMobile ? Math.min(dpr, 1.5) : dpr;
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: !isMobile,                 // MSAA is expensive on mobile GPUs
-      powerPreference: 'high-performance',
-      failIfMajorPerformanceCaveat: false,  // never refuse to start
-    });
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: !isMobile,                 // MSAA is expensive on mobile GPUs
+        powerPreference: 'high-performance',
+        failIfMajorPerformanceCaveat: false,  // never refuse to start
+      });
+    } catch (e) {
+      console.error('WebGLRenderer creation failed:', e);
+      throw new Error('WebGLを初期化できません。ブラウザの設定でWebGLを有効にするか、別のブラウザをお試しください。');
+    }
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(effectiveDpr);
     this.renderer.shadowMap.enabled = true;

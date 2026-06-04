@@ -180,11 +180,16 @@ export class InputManager {
       this.move.x = 0; this.move.z = 0;
     }
 
+    // Safari specific: ensure we don't block scrolling if not on the stick
     zone.addEventListener('pointerdown', onDown, { passive: false });
     zone.addEventListener('pointermove', onMove, { passive: false });
     zone.addEventListener('pointerup', onUp, { passive: false });
     zone.addEventListener('pointercancel', onUp, { passive: false });
+    
+    // Fallback for older Safari versions that might not support lostpointercapture
     zone.addEventListener('lostpointercapture', onUp, { passive: false });
+    zone.addEventListener('touchend', onUp, { passive: true });
+    zone.addEventListener('touchcancel', onUp, { passive: true });
 
     this._sticks.push({ zone, base, knob, role, handlers: { onDown, onMove, onUp } });
   }
