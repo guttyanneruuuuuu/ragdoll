@@ -19,11 +19,29 @@ export class Game {
     this.input = input;
     this.net = null;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // ---- Performance / device tier detection ----
+    // High-DPI phones report devicePixelRatio of 3-4, which means the GPU
+    // has to draw 9-16x more pixels than necessary. That is the #1 cause of
+    // "the game takes forever to load / runs at 5fps / won't open" on mobile.
+    // We cap the pixel ratio and scale shadow quality to the device.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || (('ontouchstart' in window) && window.innerWidth < 900);
+    this.isMobile = isMobile;
+    // On phones, render at a slightly reduced pixel ratio for a big perf win.
+    const effectiveDpr = isMobile ? Math.min(dpr, 1.5) : dpr;
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: !isMobile,                 // MSAA is expensive on mobile GPUs
+      powerPreference: 'high-performance',
+      failIfMajorPerformanceCaveat: false,  // never refuse to start
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(effectiveDpr);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFSoft is pretty; basic PCF is much cheaper on mobile.
+    this.renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -54,7 +72,9 @@ export class Game {
     const dir = new THREE.DirectionalLight(0xffffff, 1.3);
     dir.position.set(10, 20, 12);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(2048, 2048);
+    // Smaller shadow map on phones = big memory + fill-rate savings.
+    const shadowRes = this.isMobile ? 1024 : 2048;
+    dir.shadow.mapSize.set(shadowRes, shadowRes);
     dir.shadow.camera.left = -25; dir.shadow.camera.right = 25;
     dir.shadow.camera.top = 25; dir.shadow.camera.bottom = -25;
     dir.shadow.bias = -0.0005;
@@ -72,6 +92,9 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Re-clamp pixel ratio on rotate / resize so a big window doesn't tank fps.
+    const dpr = Math.min(window.devicePixelRatio || 1, this.isMobile ? 1.5 : 2);
+    this.renderer.setPixelRatio(dpr);
   }
 
   // ---- start a match ----

@@ -28,29 +28,49 @@ let net = null;
 const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const isMobileWidth = window.innerWidth < 900;
 
-function boot() {
-  ui.setLoading(30, 'シーンを構築中...');
-  game = new Game(canvas, ui, input);
-  ui.setLoading(70, 'コントロールを準備中...');
-  // touch joysticks (always init so hybrid devices work)
-  if (hasTouch) {
-    input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
-  } else {
-    // On pure desktop, completely disable pointer events on joy zones so
-    // clicking the bottom half of the canvas doesn't summon a joystick.
-    document.getElementById('joy-left')?.style.setProperty('pointer-events', 'none');
-    document.getElementById('joy-right')?.style.setProperty('pointer-events', 'none');
-    document.querySelectorAll('.joy-hint').forEach(el => el.style.display = 'none');
-  }
-  input.initDesktop(canvas);
-  ui.setLoading(100, '準備完了！');
-  // 即座にメニューを表示
-  ui.show('menu');
-  const room = new URLSearchParams(location.search).get('room');
-  if (room) {
-    ui.show('online-setup');
-    document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
-    document.getElementById('join-code').value = room.toUpperCase();
+// Yield to the browser so the loading bar actually paints between steps,
+// and so a slow WebGL context creation never freezes the page on a white
+// screen ("the game won't open" bug). Each await lets the UI breathe.
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+async function boot() {
+  try {
+    ui.setLoading(20, 'シーンを構築中...');
+    await nextFrame();
+
+    game = new Game(canvas, ui, input);
+
+    ui.setLoading(65, 'コントロールを準備中...');
+    await nextFrame();
+
+    // Single-stick controls: only the LEFT joystick is used now (sword +
+    // body follow). The right zone is kept hidden for layout but disabled.
+    if (hasTouch) {
+      input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
+    } else {
+      document.getElementById('joy-left')?.style.setProperty('pointer-events', 'none');
+      document.getElementById('joy-right')?.style.setProperty('pointer-events', 'none');
+      document.querySelectorAll('.joy-hint').forEach(el => el.style.display = 'none');
+    }
+    input.initDesktop(canvas);
+
+    ui.setLoading(100, '準備完了！');
+    await nextFrame();
+
+    ui.show('menu');
+    const room = new URLSearchParams(location.search).get('room');
+    if (room) {
+      ui.show('online-setup');
+      document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+      const jc = document.getElementById('join-code');
+      if (jc) jc.value = room.toUpperCase();
+    }
+  } catch (err) {
+    // Never leave the user stuck on the loading screen. Surface the error.
+    console.error('[boot] failed:', err);
+    ui.setLoading(100, '読み込みエラー');
+    const lt = document.getElementById('load-text');
+    if (lt) lt.textContent = '起動に失敗しました: ' + (err?.message || err);
   }
 }
 
