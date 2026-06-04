@@ -346,6 +346,9 @@ export class Game {
     const f = this.fighters[this.localIndex];
     if (!f || !f.alive) return;
     f.setMove(this.input.move.x, this.input.move.z);
+    // Single-stick: feed the live sword aim so the blade follows the stick
+    // and the body leans toward it.
+    if (this.input.swordVec) f.setAim(this.input.swordVec.x, this.input.swordVec.y);
     f.setBlock(this.input.blocking);
     const sw = this.input.consumeSwing();
     if (sw) { f.setSwing(sw.dx, sw.dy); audio.slash(); }
