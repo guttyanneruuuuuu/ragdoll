@@ -90,25 +90,31 @@ export class Fighter {
 
     this.meshes = {};
     const sphere = (name, r) => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14), mat);
+      let geo;
+      if (name === 'chest' || name === 'hip') {
+        geo = new THREE.CapsuleGeometry(r * 0.8, r * 1.2, 4, 12);
+      } else {
+        geo = new THREE.SphereGeometry(r, 18, 14);
+      }
+      const m = new THREE.Mesh(geo, mat);
       m.castShadow = true; this.group.add(m); this.meshes[name] = m;
     };
-    sphere('head', BODY.head);
+    sphere('head', BODY.head * 0.85); // 頭を少し小さくして等身を上げる
     sphere('chest', BODY.chest);
     sphere('hip', BODY.hip);
-    sphere('handL', BODY.hand);
-    sphere('handR', BODY.hand);
-    sphere('footL', BODY.foot);
-    sphere('footR', BODY.foot);
+    sphere('handL', BODY.hand * 0.7);
+    sphere('handR', BODY.hand * 0.7);
+    sphere('footL', BODY.foot * 0.8);
+    sphere('footR', BODY.foot * 0.8);
 
-    // face on head (eyes) — gives that googly look
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-    const eyeGeo = new THREE.SphereGeometry(0.09, 8, 8);
+    // face on head (eyes) — smaller and more focused
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+    const eyeGeo = new THREE.SphereGeometry(0.06, 8, 8);
     this.eyeL = new THREE.Mesh(eyeGeo, eyeMat);
     this.eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-    const eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    this.eyeWL = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10), eyeW);
-    this.eyeWR = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10), eyeW);
+    const eyeW = new THREE.MeshBasicMaterial({ color: 0xf0f0f0 });
+    this.eyeWL = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), eyeW);
+    this.eyeWR = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), eyeW);
     this.meshes.head.add(this.eyeWL, this.eyeWR);
     this.eyeWL.add(this.eyeL); this.eyeWR.add(this.eyeR);
 
@@ -120,9 +126,9 @@ export class Fighter {
       const m = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, 1, 12), tubeMat);
       m.castShadow = true; this.group.add(m); this.tubes[key] = m;
     };
-    tube('neck', 0.22); tube('spine', 0.34);
-    tube('armL', 0.16); tube('armR', 0.16);
-    tube('legL', 0.2); tube('legR', 0.2);
+    tube('neck', 0.12); tube('spine', 0.28);
+    tube('armL', 0.12); tube('armR', 0.12);
+    tube('legL', 0.16); tube('legR', 0.16);
 
     this.buildSword();
   }

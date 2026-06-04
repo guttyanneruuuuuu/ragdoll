@@ -25,16 +25,14 @@ function boot() {
   input.initTouch(document.getElementById('joy-left'), document.getElementById('joy-right'));
   input.initDesktop(canvas);
   ui.setLoading(100, '準備完了！');
-  setTimeout(() => {
-    ui.show('menu');
-    // auto-join via ?room=CODE
-    const room = new URLSearchParams(location.search).get('room');
-    if (room) {
-      ui.show('online-setup');
-      document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
-      document.getElementById('join-code').value = room.toUpperCase();
-    }
-  }, 250);
+  // 即座にメニューを表示
+  ui.show('menu');
+  const room = new URLSearchParams(location.search).get('room');
+  if (room) {
+    ui.show('online-setup');
+    document.querySelector('.online-tabs .tab[data-tab="join"]')?.click();
+    document.getElementById('join-code').value = room.toUpperCase();
+  }
 }
 
 // audio unlock

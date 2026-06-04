@@ -42,7 +42,7 @@ export class InputManager {
     right.on('end', () => {
       // fire a slash in the held direction
       const v = this._rightVec;
-      if (Math.hypot(v.x, v.y) > 0.3) this.swingQueued = { dx: v.x, dy: v.y };
+      if (Math.hypot(v.x, v.y) > 0.15) this.swingQueued = { dx: v.x, dy: v.y };
       this._rightVec = { x: 0, y: 0 };
     });
 
