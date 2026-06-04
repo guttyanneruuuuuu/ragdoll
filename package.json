@@ -22,7 +22,6 @@
   "author": "guttyanneruuuuuu",
   "license": "MIT",
   "dependencies": {
-    "nipplejs": "^0.10.2",
     "three": "^0.169.0",
     "ws": "^8.18.0"
   },

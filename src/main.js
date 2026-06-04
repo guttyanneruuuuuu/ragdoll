@@ -14,6 +14,13 @@ const ui = new UIManager();
 const input = new InputManager();
 ui.input = input;
 
+// Lightweight debug hook so automated tests (and the console) can inspect
+// the live input state. Harmless in production.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__inputMove', { get: () => input.move });
+  window.__input = input;
+}
+
 let game = null;
 let net = null;
 
