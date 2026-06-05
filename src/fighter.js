@@ -30,6 +30,10 @@ export class Fighter {
     this.blocking = false;
     this.moveDir = { x: 0, z: 0 };
     this.swingDir = { x: 0, y: 0 };
+    // Live aim of the sword from the single stick (screen x:right, y:up).
+    // Held continuously so the blade points where the stick points and the
+    // body leans/drifts to "follow the sword".
+    this.aim = { x: 0, y: 0 };
     this.koTimer = 0;
 
     this.nodes = {};
@@ -180,6 +184,8 @@ export class Fighter {
 
   // ---- control inputs from player / AI / net ----
   setMove(x, z) { this.moveDir.x = x; this.moveDir.z = z; }
+  // Continuous sword aim from the stick (single-stick control).
+  setAim(x, y) { this.aim.x = x; this.aim.y = y; }
   setSwing(dx, dy) {
     // dx,dy normalized direction of swipe; triggers a slash
     const mag = Math.hypot(dx, dy);
@@ -266,6 +272,9 @@ export class Fighter {
     // default rest direction of blade (held up-ish, toward facing)
     let dir = { x: this.facing * 0.4, y: 0.9, z: 0 };
 
+    // Aim magnitude tells us how hard the stick is pushed (0..~1.4).
+    const aimMag = Math.hypot(this.aim.x, this.aim.y);
+
     if (this.alive && !this.locked.armR) {
       if (this.swinging) {
         this.swingT += dt * (3.2 * this.weapon.swing);
@@ -286,6 +295,26 @@ export class Fighter {
         hand.p.y += (ty - hand.p.y) * 0.5;
         hand.p.z += (tz - hand.p.z) * 0.5;
         if (t >= Math.PI) { this.swinging = false; this.swingT = 0; }
+      } else if (aimMag > 0.12) {
+        // ---- SINGLE-STICK AIM: blade points where the stick points ----
+        // Map screen aim (x:right, y:up) onto the world. The blade rises
+        // with up-aim and sweeps left/right toward the opponent's side.
+        const ax = this.aim.x, ay = this.aim.y;
+        dir = {
+          x: ax * 1.2 + this.facing * 0.25,
+          y: 0.45 + ay * 1.0,
+          z: 0,
+        };
+        // The hand reaches out along the aim — the further you push the
+        // stick, the more the arm extends (and the more the body leans).
+        const reach = 0.55 + Math.min(aimMag, 1.2) * 0.7;
+        const tx = chest.x + dir.x * reach;
+        const ty = chest.y + dir.y * reach;
+        hand.p.x += (tx - hand.p.x) * 0.35;
+        hand.p.y += (ty - hand.p.y) * 0.35;
+        // "Body follows the sword": pull the chest slightly toward the aim
+        // so leaning the blade tilts the torso. Subtle so it stays stable.
+        chest.x += ax * reach * 0.12 * (this.locked.spine ? 0.3 : 1);
       } else if (this.blocking) {
         dir = { x: this.facing * 0.2, y: 1.0, z: 0 };
         const tx = chest.x + dir.x, ty = chest.y + dir.y, tz = chest.z;

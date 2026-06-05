@@ -8,7 +8,7 @@ export default defineConfig({
     allowedHosts: true,
   },
   build: {
-    target: 'esnext',
+    target: 'es2020',
     outDir: 'dist',
     sourcemap: false,
   },

@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>⚔ RAGBLADE ARENA — Ragdoll Blade 3D</title>
+  <!-- Inline SVG favicon (a sword) so the browser never 404s on favicon.ico -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9A%94%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="./src/styles/main.css">
   <script type="module" src="./src/main.js"></script>
 </head>
@@ -56,7 +58,7 @@
   <div class="screen" data-screen="local-setup">
     <div class="panel">
       <h2>👥 ローカル2P</h2>
-      <p class="hint">同じ端末で2人対戦。P1=左ジョイ/WASD、剣は右ジョイ/マウス。</p>
+      <p class="hint">同じ端末で2人対戦。P1=スティック/マウスで剣、P2=矢印キー＋Enterで斬撃。</p>
       <label>P1 武器</label>
       <select id="local-weapon1"></select>
       <label>P2 武器</label>
@@ -127,12 +129,12 @@
     <div class="panel">
       <h2>❔ あそびかた</h2>
       <ul class="howto-list">
-        <li><b>移動</b>：左の青ジョイスティック / WASD・矢印キー</li>
-        <li><b>斬撃</b>：右の黄ジョイスティックを倒して離す / マウスをドラッグ</li>
-        <li><b>ガード</b>：右クリック長押し / Space</li>
+        <li><b>🕹 1本のスティックだけ！</b>：画面を指でなぞるとその向きに<b>剣をふり</b>、<b>体もついてくる</b>。</li>
+        <li><b>斬る</b>：剣を素早く<b>シュッと振る</b>（フリック）と斬撃！ ゆっくり倒して離してもOK。</li>
+        <li><b>近づく / 下がる</b>：剣を相手の方へ向ければ前進、手前に引けば後退。</li>
+        <li><b>PC</b>：WASD/矢印で移動、マウスをドラッグで剣をふる、Shift/右クリックでガード。</li>
         <li><b>関節ロック</b>：斬られた部位の関節が動かなくなる。4箇所ロックでKO！</li>
         <li><b>切断</b>：ダメージが大きいと部位が吹き飛ぶ＝即KO</li>
-        <li><b>リングアウト</b>：場外に落ちると敗北（ステージによる）</li>
         <li><b>勝利条件</b>：2本先取（Best of 3）</li>
       </ul>
       <div class="row">
@@ -162,12 +164,13 @@
     <div id="announce" class="announce"></div>
   </div>
 
-  <!-- ============ TOUCH CONTROLS ============ -->
+  <!-- ============ TOUCH CONTROLS (single stick) ============ -->
   <div id="touch-controls">
-    <div id="joy-left" class="joy-zone left"></div>
-    <div id="joy-right" class="joy-zone right"></div>
-    <div class="joy-hint left">移動</div>
-    <div class="joy-hint right">斬撃</div>
+    <!-- One full-width sword stick: aim the blade, flick to slash,
+         the body follows. The right zone is unused (kept for layout). -->
+    <div id="joy-left" class="joy-zone single"></div>
+    <div id="joy-right" class="joy-zone right" style="display:none"></div>
+    <div class="joy-hint single">⚔ 指でなぞって剣をふる</div>
   </div>
 
   <!-- ============ PAUSE ============ -->
