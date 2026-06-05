@@ -19,11 +19,34 @@ export class Game {
     this.input = input;
     this.net = null;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // ---- Performance / device tier detection ----
+    // High-DPI phones report devicePixelRatio of 3-4, which means the GPU
+    // has to draw 9-16x more pixels than necessary. That is the #1 cause of
+    // "the game takes forever to load / runs at 5fps / won't open" on mobile.
+    // We cap the pixel ratio and scale shadow quality to the device.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || (('ontouchstart' in window) && window.innerWidth < 900);
+    this.isMobile = isMobile;
+    // On phones, render at a slightly reduced pixel ratio for a big perf win.
+    const effectiveDpr = isMobile ? Math.min(dpr, 1.5) : dpr;
+
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: !isMobile,                 // MSAA is expensive on mobile GPUs
+        powerPreference: 'high-performance',
+        failIfMajorPerformanceCaveat: false,  // never refuse to start
+      });
+    } catch (e) {
+      console.error('WebGLRenderer creation failed:', e);
+      throw new Error('WebGLを初期化できません。ブラウザの設定でWebGLを有効にするか、別のブラウザをお試しください。');
+    }
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(effectiveDpr);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFSoft is pretty; basic PCF is much cheaper on mobile.
+    this.renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -54,7 +77,9 @@ export class Game {
     const dir = new THREE.DirectionalLight(0xffffff, 1.3);
     dir.position.set(10, 20, 12);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(2048, 2048);
+    // Smaller shadow map on phones = big memory + fill-rate savings.
+    const shadowRes = this.isMobile ? 1024 : 2048;
+    dir.shadow.mapSize.set(shadowRes, shadowRes);
     dir.shadow.camera.left = -25; dir.shadow.camera.right = 25;
     dir.shadow.camera.top = 25; dir.shadow.camera.bottom = -25;
     dir.shadow.bias = -0.0005;
@@ -72,6 +97,9 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Re-clamp pixel ratio on rotate / resize so a big window doesn't tank fps.
+    const dpr = Math.min(window.devicePixelRatio || 1, this.isMobile ? 1.5 : 2);
+    this.renderer.setPixelRatio(dpr);
   }
 
   // ---- start a match ----
@@ -323,9 +351,36 @@ export class Game {
     const f = this.fighters[this.localIndex];
     if (!f || !f.alive) return;
     f.setMove(this.input.move.x, this.input.move.z);
+    // Single-stick: feed the live sword aim so the blade follows the stick
+    // and the body leans toward it.
+    if (this.input.swordVec) f.setAim(this.input.swordVec.x, this.input.swordVec.y);
     f.setBlock(this.input.blocking);
+
+    // 1) Explicit flick/release swing from input system.
     const sw = this.input.consumeSwing();
-    if (sw) { f.setSwing(sw.dx, sw.dy); audio.slash(); }
+    if (sw) {
+      f.setSwing(sw.dx, sw.dy);
+      audio.slash();
+      this._nextHoldSwingAt = performance.now() + 180;
+      return;
+    }
+
+    // 2) Hold-to-attack: while the dynamic stick is still held and pushed,
+    // keep chaining slashes without forcing the player to release the thumb.
+    const aim = this.input.swordVec || { x: 0, y: 0 };
+    const aimMag = Math.hypot(aim.x, aim.y);
+    if (this.input.stickActive && aimMag > 0.5 && !f.swinging && !f.locked.armR) {
+      const now = performance.now();
+      if (!this._nextHoldSwingAt || now >= this._nextHoldSwingAt) {
+        f.setSwing(aim.x, aim.y);
+        audio.slash();
+        // Fast rhythm when fully pushed, slightly slower near threshold.
+        const cadence = aimMag > 0.95 ? 190 : 240;
+        this._nextHoldSwingAt = now + cadence;
+      }
+    } else if (!this.input.stickActive || aimMag < 0.35) {
+      this._nextHoldSwingAt = 0;
+    }
   }
 
   // P2 control for local 2P: arrow keys move, "/" or Enter swings,
